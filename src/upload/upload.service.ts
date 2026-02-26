@@ -17,6 +17,15 @@ export class UploadService implements OnModuleInit {
     const secretKey = this.configService.get<string>('MINIO_SECRET_KEY');
     this.bucketName = this.configService.get<string>('MINIO_BUCKET_NAME');
 
+    console.log('MINIO CONFIG >>>', {
+      endpoint,
+      port,
+      useSSL,
+      accessKey,
+      secretKey,
+      bucket: this.bucketName,
+    });
+
     this.minioClient = new Minio.Client({
       endPoint: endpoint,
       port: port,

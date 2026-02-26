@@ -34,6 +34,20 @@ export class AuthService {
   ) {}
 
   async registerPatient(dto: RegisterPatientDto, file?: Express.Multer.File) {
+    console.log('=== REGISTER PATIENT ===');
+    console.log('DTO:', dto);
+    console.log(
+      'File received:',
+      file
+        ? {
+            fieldname: file.fieldname,
+            originalname: file.originalname,
+            mimetype: file.mimetype,
+            size: file.size,
+          }
+        : 'No file',
+    );
+
     const existingUser = await this.userRepository.findOne({
       where: { email: dto.email },
     });
@@ -44,7 +58,9 @@ export class AuthService {
 
     let profileImageUrl = null;
     if (file) {
+      console.log('Uploading file to MinIO...');
       profileImageUrl = await this.uploadService.uploadFile(file, 'profiles');
+      console.log('File uploaded successfully. URL:', profileImageUrl);
     }
 
     const hashedPassword = await bcrypt.hash(dto.password, 10);
@@ -62,6 +78,7 @@ export class AuthService {
     });
 
     const savedPatient = await this.patientRepository.save(patient);
+    console.log('Patient saved with profileImage:', savedPatient.profileImage);
 
     const token = this.generateToken(savedPatient);
 

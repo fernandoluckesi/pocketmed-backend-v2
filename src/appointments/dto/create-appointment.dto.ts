@@ -2,20 +2,41 @@ import { ApiProperty } from '@nestjs/swagger';
 import { IsString, IsNotEmpty, IsDateString, IsUUID, IsOptional, IsBoolean } from 'class-validator';
 
 export class CreateAppointmentDto {
-  @ApiProperty({ example: '123456' })
-  @IsString()
-  @IsNotEmpty()
-  doctorCrm: string;
+  @ApiProperty({
+    example: '123e4567-e89b-12d3-a456-426614174000',
+    required: false,
+    description: 'ID do médico cadastrado (se existir)',
+  })
+  @IsUUID()
+  @IsOptional()
+  doctorId?: string;
 
-  @ApiProperty({ example: 'Dr. João Santos' })
+  @ApiProperty({
+    example: '123456',
+    required: false,
+    description: 'CRM do médico (obrigatório se doctorId não for fornecido)',
+  })
   @IsString()
-  @IsNotEmpty()
-  doctorName: string;
+  @IsOptional()
+  doctorCrm?: string;
 
-  @ApiProperty({ example: 'Cardiologia' })
+  @ApiProperty({
+    example: 'Dr. João Santos',
+    required: false,
+    description: 'Nome do médico (obrigatório se doctorId não for fornecido)',
+  })
   @IsString()
-  @IsNotEmpty()
-  doctorSpecialty: string;
+  @IsOptional()
+  doctorName?: string;
+
+  @ApiProperty({
+    example: 'Cardiologia',
+    required: false,
+    description: 'Especialidade do médico (obrigatório se doctorId não for fornecido)',
+  })
+  @IsString()
+  @IsOptional()
+  doctorSpecialty?: string;
 
   @ApiProperty({ example: 'Consulta de rotina para acompanhamento cardíaco' })
   @IsString()

@@ -17,13 +17,12 @@ export class AppointmentsController {
   constructor(private appointmentsService: AppointmentsService) {}
 
   @Post()
-  @Roles('doctor')
-  @ApiOperation({ summary: 'Create appointment (doctors only)' })
+  @ApiOperation({ summary: 'Create appointment (doctors and patients)' })
   @ApiResponse({ status: 201, description: 'Appointment created successfully' })
   @ApiResponse({ status: 403, description: 'Forbidden - No permission' })
   @ApiResponse({ status: 404, description: 'Patient or Dependent not found' })
   async create(@CurrentUser() user: any, @Body() dto: CreateAppointmentDto) {
-    return this.appointmentsService.create(user.userId, dto);
+    return this.appointmentsService.create(user.userId, user.type, dto);
   }
 
   @Get()

@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+  BadRequestException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Appointment, AppointmentStatus } from '../entities/appointment.entity';
@@ -8,6 +13,7 @@ import { Dependent } from '../entities/dependent.entity';
 import { DoctorsService } from '../doctors/doctors.service';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import { UpdateAppointmentDto } from './dto/update-appointment.dto';
+import { PatientsService } from 'src/patients/patients.service';
 
 @Injectable()
 export class AppointmentsService {
@@ -21,9 +27,22 @@ export class AppointmentsService {
     @InjectRepository(Dependent)
     private dependentRepository: Repository<Dependent>,
     private doctorsService: DoctorsService,
+    private patientsService: PatientsService,
   ) {}
 
-  async create(doctorId: string, dto: CreateAppointmentDto) {
+  async create(userId: string, userType: string, dto: CreateAppointmentDto) {
+    if (userType === 'doctor') {
+      return this.createByDoctor(userId, dto);
+    }
+
+    if (userType === 'patient') {
+      return this.createByPatient(userId, dto);
+    }
+
+    throw new ForbiddenException('Invalid user type');
+  }
+
+  private async createByDoctor(doctorId: string, dto: CreateAppointmentDto) {
     if (!dto.patientId && !dto.dependentId) {
       throw new BadRequestException('Either patientId or dependentId must be provided');
     }
@@ -73,10 +92,101 @@ export class AppointmentsService {
     }
 
     const appointment = this.appointmentRepository.create({
-      ...dto,
-      doctorId,
+      doctorCrm: doctor.crm,
+      doctorName: doctor.name,
+      doctorSpecialty: doctor.specialty,
+      reason: dto.reason,
       dateTime: new Date(dto.dateTime),
+      isCompleted: dto.isCompleted || false,
+      doctorFeedback: dto.doctorFeedback,
+      doctorInstructions: dto.doctorInstructions,
+      doctorId,
+      patientId: dto.patientId,
+      dependentId: dto.dependentId,
       status: AppointmentStatus.PENDING,
+    });
+
+    return await this.appointmentRepository.save(appointment);
+  }
+
+  private async createByPatient(patientId: string, dto: CreateAppointmentDto) {
+    if (dto.patientId && dto.patientId !== patientId && !dto.dependentId) {
+      throw new ForbiddenException(
+        'You can only create appointments for yourself or your dependents',
+      );
+    }
+
+    if (dto.dependentId) {
+      const dependent = await this.dependentRepository
+        .createQueryBuilder('dependent')
+        .leftJoinAndSelect('dependent.responsibles', 'responsibles')
+        .where('dependent.id = :dependentId', { dependentId: dto.dependentId })
+        .getOne();
+
+      if (!dependent) {
+        throw new NotFoundException('Dependent not found');
+      }
+
+      const isResponsible = dependent.responsibles.some((r) => r.id === patientId);
+
+      if (!isResponsible) {
+        throw new ForbiddenException('You are not responsible for this dependent');
+      }
+    }
+
+    let doctorId: string;
+    let doctorCrm: string;
+    let doctorName: string;
+    let doctorSpecialty: string;
+
+    if (dto.doctorId) {
+      const doctor = await this.doctorRepository.findOne({
+        where: { id: dto.doctorId },
+      });
+
+      if (!doctor) {
+        throw new NotFoundException('Doctor not found');
+      }
+
+      doctorId = doctor.id;
+      doctorCrm = doctor.crm;
+      doctorName = doctor.name;
+      doctorSpecialty = doctor.specialty;
+    } else {
+      if (!dto.doctorCrm || !dto.doctorName || !dto.doctorSpecialty) {
+        throw new BadRequestException(
+          'If doctorId is not provided, doctorCrm, doctorName, and doctorSpecialty are required',
+        );
+      }
+
+      const doctor = await this.doctorRepository.findOne({
+        where: { crm: dto.doctorCrm },
+      });
+
+      if (doctor) {
+        doctorId = doctor.id;
+        doctorCrm = doctor.crm;
+        doctorName = doctor.name;
+        doctorSpecialty = doctor.specialty;
+      } else {
+        doctorId = null;
+        doctorCrm = dto.doctorCrm;
+        doctorName = dto.doctorName;
+        doctorSpecialty = dto.doctorSpecialty;
+      }
+    }
+
+    const appointment = this.appointmentRepository.create({
+      doctorCrm,
+      doctorName,
+      doctorSpecialty,
+      reason: dto.reason,
+      dateTime: new Date(dto.dateTime),
+      isCompleted: false,
+      doctorId,
+      patientId: dto.dependentId ? null : patientId,
+      dependentId: dto.dependentId,
+      status: AppointmentStatus.APPROVED,
     });
 
     return await this.appointmentRepository.save(appointment);
@@ -162,7 +272,12 @@ export class AppointmentsService {
     return await this.appointmentRepository.save(appointment);
   }
 
-  async respondToAppointment(id: string, status: AppointmentStatus, userId: string, userType: string) {
+  async respondToAppointment(
+    id: string,
+    status: AppointmentStatus,
+    userId: string,
+    userType: string,
+  ) {
     const appointment = await this.appointmentRepository.findOne({
       where: { id },
       relations: ['dependent', 'dependent.responsibles'],

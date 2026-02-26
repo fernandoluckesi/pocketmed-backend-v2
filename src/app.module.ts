@@ -29,6 +29,7 @@ import { DoctorPermission } from './entities/doctor-permission.entity';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      envFilePath: '.env',
     }),
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],

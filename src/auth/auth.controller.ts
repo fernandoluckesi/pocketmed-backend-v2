@@ -9,13 +9,7 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import {
-  ApiTags,
-  ApiOperation,
-  ApiResponse,
-  ApiConsumes,
-  ApiBearerAuth,
-} from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiConsumes, ApiBearerAuth } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
 import { RegisterPatientDto } from './dto/register-patient.dto';
 import { RegisterDoctorDto } from './dto/register-doctor.dto';
@@ -46,6 +40,16 @@ export class AuthController {
     @Body() dto: RegisterPatientDto,
     @UploadedFile() file?: Express.Multer.File,
   ) {
+    console.log('=== AUTH CONTROLLER - REGISTER PATIENT ===');
+    console.log('File received in controller:', file ? 'YES' : 'NO');
+    if (file) {
+      console.log('File details:', {
+        fieldname: file.fieldname,
+        originalname: file.originalname,
+        mimetype: file.mimetype,
+        size: file.size,
+      });
+    }
     return this.authService.registerPatient(dto, file);
   }
 
@@ -71,10 +75,7 @@ export class AuthController {
   @ApiConsumes('multipart/form-data')
   @ApiResponse({ status: 201, description: 'Doctor registered successfully' })
   @ApiResponse({ status: 409, description: 'Email already registered' })
-  async registerDoctor(
-    @Body() dto: RegisterDoctorDto,
-    @UploadedFile() file?: Express.Multer.File,
-  ) {
+  async registerDoctor(@Body() dto: RegisterDoctorDto, @UploadedFile() file?: Express.Multer.File) {
     return this.authService.registerDoctor(dto, file);
   }
 

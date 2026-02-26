@@ -36,8 +36,13 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api/docs', app, document);
 
+  app.getHttpAdapter().get('/api/docs-json', (req, res) => {
+    res.json(document);
+  });
+
   await app.listen(3000);
   console.log(`Application is running on: ${await app.getUrl()}`);
   console.log(`Swagger documentation available at: ${await app.getUrl()}/api/docs`);
+  console.log(`Swagger JSON available at: ${await app.getUrl()}/api/docs-json`);
 }
 bootstrap();
