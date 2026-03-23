@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Param, Body, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Patch, Param, Body, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { DoctorsService } from './doctors.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -48,6 +48,17 @@ export class DoctorsController {
     return this.doctorsService.getMyAccessRequests(user.userId);
   }
 
+  @Delete('access-requests/:id')
+  @Roles('doctor')
+  @ApiOperation({ summary: 'Cancel my own pending access request (doctors only)' })
+  @ApiResponse({ status: 200, description: 'Access request cancelled' })
+  @ApiResponse({ status: 400, description: 'Only pending requests can be cancelled' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  @ApiResponse({ status: 404, description: 'Access request not found' })
+  async cancelAccessRequest(@Param('id') id: string, @CurrentUser() user: any) {
+    return this.doctorsService.cancelAccessRequest(id, user.userId);
+  }
+
   @Post('access-requests/:id/respond')
   @Roles('patient')
   @ApiOperation({ summary: 'Respond to access request (patients only)' })
@@ -76,5 +87,23 @@ export class DoctorsController {
   @ApiResponse({ status: 200, description: 'Return access requests' })
   async getAccessRequestsForDependents(@CurrentUser() user: any) {
     return this.doctorsService.getAccessRequestsForDependents(user.userId);
+  }
+
+  @Get('permissions/patient/me')
+  @Roles('patient')
+  @ApiOperation({ summary: 'Get active doctor permissions for my patient profile' })
+  @ApiResponse({ status: 200, description: 'Return active permissions' })
+  async getMyPermissions(@CurrentUser() user: any) {
+    return this.doctorsService.getPermissionsForPatient(user.userId);
+  }
+
+  @Patch('permissions/:id/revoke')
+  @Roles('patient')
+  @ApiOperation({ summary: 'Revoke a doctor permission (patients only)' })
+  @ApiResponse({ status: 200, description: 'Permission revoked' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  @ApiResponse({ status: 404, description: 'Permission not found' })
+  async revokePermission(@Param('id') id: string, @CurrentUser() user: any) {
+    return this.doctorsService.revokePermission(id, user.userId, user.type);
   }
 }

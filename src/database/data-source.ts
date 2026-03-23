@@ -9,6 +9,8 @@ import { Medication } from '../entities/medication.entity';
 import { Exam } from '../entities/exam.entity';
 import { DoctorAccessRequest } from '../entities/doctor-access-request.entity';
 import { DoctorPermission } from '../entities/doctor-permission.entity';
+import { DeviceToken } from '../entities/device-token.entity';
+import { Notification } from '../entities/notification.entity';
 
 const AppDataSource = new DataSource({
   type: 'mysql',
@@ -26,6 +28,8 @@ const AppDataSource = new DataSource({
     Exam,
     DoctorAccessRequest,
     DoctorPermission,
+    DeviceToken,
+    Notification,
   ],
   migrations: [__dirname + '/migrations/*{.ts,.js}'],
   synchronize: false,

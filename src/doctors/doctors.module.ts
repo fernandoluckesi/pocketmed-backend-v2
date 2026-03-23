@@ -7,10 +7,12 @@ import { Patient } from '../entities/patient.entity';
 import { Dependent } from '../entities/dependent.entity';
 import { DoctorAccessRequest } from '../entities/doctor-access-request.entity';
 import { DoctorPermission } from '../entities/doctor-permission.entity';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Doctor, Patient, Dependent, DoctorAccessRequest, DoctorPermission]),
+    NotificationsModule,
   ],
   controllers: [DoctorsController],
   providers: [DoctorsService],

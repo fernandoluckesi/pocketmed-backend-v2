@@ -26,6 +26,9 @@ import { DoctorAccessRequest } from './entities/doctor-access-request.entity';
 import { DoctorPermission } from './entities/doctor-permission.entity';
 import { AvailabilityRule } from './entities/availability-rule.entity';
 import { AvailabilityException } from './entities/availability-exception.entity';
+import { DeviceToken } from './entities/device-token.entity';
+import { Notification } from './entities/notification.entity';
+import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
   imports: [
@@ -53,6 +56,8 @@ import { AvailabilityException } from './entities/availability-exception.entity'
           DoctorPermission,
           AvailabilityRule,
           AvailabilityException,
+          DeviceToken,
+          Notification,
         ],
         migrations: [__dirname + '/database/migrations/*{.ts,.js}'],
         synchronize: false,
@@ -70,6 +75,7 @@ import { AvailabilityException } from './entities/availability-exception.entity'
     AvailabilityModule,
     UploadModule,
     EmailModule,
+    NotificationsModule,
   ],
   controllers: [AppController],
   providers: [
