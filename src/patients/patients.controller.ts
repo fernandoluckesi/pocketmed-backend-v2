@@ -16,7 +16,7 @@ export class PatientsController {
   @ApiResponse({ status: 200, description: 'Return all patients' })
   @ApiResponse({ status: 403, description: 'Forbidden - Only doctors can view all patients' })
   async findAll(@CurrentUser() user: any) {
-    return this.patientsService.findAll(user.type);
+    return this.patientsService.findAll(user.type, user.userId);
   }
 
   @Get('search')
@@ -25,7 +25,7 @@ export class PatientsController {
   @ApiResponse({ status: 200, description: 'Return matching patients' })
   @ApiResponse({ status: 403, description: 'Forbidden or query too short' })
   async search(@Query('q') query: string, @CurrentUser() user: any) {
-    return this.patientsService.search(query, user.type);
+    return this.patientsService.search(query, user.type, user.userId);
   }
 
   @Get(':id')
