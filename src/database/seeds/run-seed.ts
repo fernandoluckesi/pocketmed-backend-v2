@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import * as bcrypt from 'bcrypt';
 import { In } from 'typeorm';
 import AppDataSource from '../data-source';
+import { seedClinic } from './seed-clinic';
 import { Doctor } from '../../entities/doctor.entity';
 import { Patient } from '../../entities/patient.entity';
 import { Dependent } from '../../entities/dependent.entity';
@@ -365,6 +366,8 @@ export async function seedDatabase() {
   console.log(
     `Pacientes comuns existentes/criados para login: ${generatedPatients.length} com senha 958969`,
   );
+
+  await seedClinic();
 
   if (shouldDestroyConnection && AppDataSource.isInitialized) {
     await AppDataSource.destroy();

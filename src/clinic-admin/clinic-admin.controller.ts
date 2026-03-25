@@ -89,4 +89,20 @@ export class ClinicAdminController {
   async listClinicDoctors(@CurrentUser() user: any) {
     return this.clinicAdminService.listClinicDoctors(user);
   }
+
+  @Get('doctors/search')
+  @ApiOperation({
+    summary: 'Search doctors by name/email/cpf and flag clinic membership (admins only)',
+  })
+  @ApiResponse({ status: 200, description: 'Doctors search returned successfully' })
+  async searchDoctors(@CurrentUser() user: any, @Query('q') q: string) {
+    return this.clinicAdminService.searchDoctors(user, q);
+  }
+
+  @Get('doctors/search/email')
+  @ApiOperation({ summary: 'Find doctor by exact email and flag clinic membership (admins only)' })
+  @ApiResponse({ status: 200, description: 'Doctor lookup returned successfully' })
+  async findDoctorByEmail(@CurrentUser() user: any, @Query('email') email: string) {
+    return this.clinicAdminService.findDoctorByEmail(user, email);
+  }
 }

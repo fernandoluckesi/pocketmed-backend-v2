@@ -11,6 +11,8 @@ const TABLES_TO_TRUNCATE = [
   'appointments',
   'dependents',
   'patients',
+  'clinic_memberships',
+  'clinics',
   'doctors',
 ];
 

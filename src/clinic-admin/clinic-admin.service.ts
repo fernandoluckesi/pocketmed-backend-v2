@@ -516,4 +516,111 @@ export class ClinicAdminService {
 
     return doctors;
   }
+
+  async searchDoctors(user: any, query: string) {
+    const { clinicId } = this.getAdminContext(user);
+    const normalizedQuery = String(query || '')
+      .trim()
+      .toLowerCase();
+
+    if (normalizedQuery.length < 2) {
+      return [];
+    }
+
+    const onlyDigits = normalizedQuery.replace(/\D/g, '');
+
+    const doctorsQb = this.doctorRepository
+      .createQueryBuilder('doctor')
+      .select([
+        'doctor.id',
+        'doctor.name',
+        'doctor.email',
+        'doctor.gender',
+        'doctor.specialty',
+        'doctor.crm',
+        'doctor.cpf',
+        'doctor.phone',
+        'doctor.birthDate',
+        'doctor.profileImage',
+        'doctor.type',
+      ])
+      .where('LOWER(doctor.name) LIKE :query', { query: `%${normalizedQuery}%` })
+      .orWhere('LOWER(doctor.email) LIKE :query', { query: `%${normalizedQuery}%` })
+      .orderBy('doctor.name', 'ASC')
+      .take(20);
+
+    if (onlyDigits) {
+      doctorsQb.orWhere('doctor.cpf LIKE :cpf', { cpf: `%${onlyDigits}%` });
+    }
+
+    const doctors = await doctorsQb.getMany();
+    if (doctors.length === 0) {
+      return [];
+    }
+
+    const doctorIds = doctors.map((doctor) => doctor.id);
+    const activeMemberships = await this.clinicMembershipRepository.find({
+      where: {
+        clinicId,
+        isActive: true,
+        professionalId: In(doctorIds),
+      },
+      select: ['professionalId'],
+    });
+
+    const clinicMemberIds = new Set(
+      activeMemberships.map((membership) => membership.professionalId),
+    );
+
+    return doctors.map((doctor) => ({
+      ...this.sanitizeDoctor(doctor),
+      isClinicMember: clinicMemberIds.has(doctor.id),
+    }));
+  }
+
+  async findDoctorByEmail(user: any, email: string) {
+    const { clinicId } = this.getAdminContext(user);
+    const normalizedEmail = String(email || '')
+      .trim()
+      .toLowerCase();
+
+    if (!normalizedEmail) {
+      throw new BadRequestException('Email is required');
+    }
+
+    const doctor = await this.doctorRepository.findOne({
+      where: { email: normalizedEmail },
+      select: [
+        'id',
+        'name',
+        'email',
+        'gender',
+        'specialty',
+        'crm',
+        'cpf',
+        'phone',
+        'birthDate',
+        'profileImage',
+        'type',
+      ],
+    });
+
+    if (!doctor) {
+      return null;
+    }
+
+    const membership = await this.clinicMembershipRepository.findOne({
+      where: {
+        clinicId,
+        professionalId: doctor.id,
+        isActive: true,
+      },
+      select: ['id'],
+    });
+
+    return {
+      ...this.sanitizeDoctor(doctor),
+      isClinicMember: Boolean(membership),
+    };
+  }
 }
