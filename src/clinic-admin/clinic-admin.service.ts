@@ -8,6 +8,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { ClinicMembership } from '../entities/clinic-membership.entity';
+import { Clinic } from '../entities/clinic.entity';
 import { Doctor } from '../entities/doctor.entity';
 import { Patient } from '../entities/patient.entity';
 import { DoctorPermission } from '../entities/doctor-permission.entity';
@@ -23,6 +24,8 @@ export class ClinicAdminService {
   constructor(
     @InjectRepository(ClinicMembership)
     private clinicMembershipRepository: Repository<ClinicMembership>,
+    @InjectRepository(Clinic)
+    private clinicRepository: Repository<Clinic>,
     @InjectRepository(Doctor)
     private doctorRepository: Repository<Doctor>,
     @InjectRepository(Patient)
@@ -80,6 +83,11 @@ export class ClinicAdminService {
   async getOverview(user: any) {
     const { clinicId } = this.getAdminContext(user);
 
+    const clinic = await this.clinicRepository.findOne({
+      where: { id: clinicId },
+      select: ['id', 'name'],
+    });
+
     const memberships = await this.clinicMembershipRepository.find({
       where: { clinicId, isActive: true },
       select: ['id', 'professionalId', 'role'],
@@ -92,6 +100,7 @@ export class ClinicAdminService {
     if (doctorIds.length === 0) {
       return {
         clinicId,
+        clinicName: clinic?.name || null,
         members: {
           total: memberships.length,
           admins: memberships.filter((m) => m.role === ProfessionalRole.ADMIN).length,
@@ -119,6 +128,7 @@ export class ClinicAdminService {
 
     return {
       clinicId,
+      clinicName: clinic?.name || null,
       members: {
         total: memberships.length,
         admins: memberships.filter((m) => m.role === ProfessionalRole.ADMIN).length,
