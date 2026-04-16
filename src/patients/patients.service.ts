@@ -143,24 +143,15 @@ export class PatientsService {
     userRole?: string | null,
     activeClinicId?: string | null,
   ) {
-    if (userType !== 'doctor') {
-      throw new ForbiddenException('Only professionals can view patients');
+    if (userType !== 'doctor' || userRole !== ProfessionalRole.DOCTOR) {
+      throw new ForbiddenException('Only doctors can view patients');
     }
 
     if (!userId) {
       return [];
     }
 
-    let patientIds: string[] = [];
-
-    if (userRole === ProfessionalRole.ADMIN || userRole === ProfessionalRole.SECRETARY) {
-      if (!activeClinicId) {
-        return [];
-      }
-      patientIds = await this.getClinicPatientIds(activeClinicId);
-    } else {
-      patientIds = await this.getAccessiblePatientIdsForDoctor(userId);
-    }
+    const patientIds = await this.getAccessiblePatientIdsForDoctor(userId);
 
     if (patientIds.length === 0) {
       return [];
@@ -174,8 +165,8 @@ export class PatientsService {
     return patients.map((patient) => ({
       ...patient,
       createdByDoctorId: patient.doctorCreatorId,
-      hasPermission: userRole === ProfessionalRole.SECRETARY ? false : true,
-      hasAccess: userRole === ProfessionalRole.SECRETARY ? false : true,
+      hasPermission: true,
+      hasAccess: true,
     }));
   }
 
@@ -185,31 +176,8 @@ export class PatientsService {
     userRole?: string | null,
     activeClinicId?: string | null,
   ) {
-    if (userType !== 'doctor') {
-      throw new ForbiddenException('Only professionals can view patients');
-    }
-
-    if (userRole === ProfessionalRole.ADMIN || userRole === ProfessionalRole.SECRETARY) {
-      if (!activeClinicId) {
-        return [];
-      }
-
-      const patientIds = await this.getClinicPatientIds(activeClinicId);
-      if (patientIds.length === 0) {
-        return [];
-      }
-
-      const patients = await this.patientRepository.find({
-        where: { id: In(patientIds) },
-        select: this.patientSelectFields,
-      });
-
-      return patients.map((patient) => ({
-        ...patient,
-        createdByDoctorId: patient.doctorCreatorId,
-        hasPermission: userRole === ProfessionalRole.SECRETARY ? false : true,
-        hasAccess: userRole === ProfessionalRole.SECRETARY ? false : true,
-      }));
+    if (userType !== 'doctor' || userRole !== ProfessionalRole.DOCTOR) {
+      throw new ForbiddenException('Only doctors can view all patients');
     }
 
     const patients = await this.patientRepository.find({
@@ -282,26 +250,8 @@ export class PatientsService {
     }
 
     if (userType === 'doctor' && userId) {
-      if (userRole === ProfessionalRole.SECRETARY) {
-        throw new ForbiddenException('Secretary cannot access patient profile details');
-      }
-
-      if (userRole === ProfessionalRole.ADMIN) {
-        if (!activeClinicId) {
-          throw new ForbiddenException('No active clinic context found');
-        }
-
-        const clinicPatientIds = await this.getClinicPatientIds(activeClinicId);
-        if (!clinicPatientIds.includes(id)) {
-          throw new ForbiddenException('Patient does not belong to current clinic scope');
-        }
-
-        return {
-          ...patient,
-          createdByDoctorId: patient.doctorCreatorId,
-          hasPermission: true,
-          hasAccess: true,
-        };
+      if (userRole !== ProfessionalRole.DOCTOR) {
+        throw new ForbiddenException('Only doctors can access patient profile details');
       }
 
       const isCreator = patient.doctorCreatorId === userId;
@@ -336,8 +286,8 @@ export class PatientsService {
     userRole?: string | null,
     activeClinicId?: string | null,
   ) {
-    if (userType !== 'doctor') {
-      throw new ForbiddenException('Only professionals can search patients');
+    if (userType !== 'doctor' || userRole !== ProfessionalRole.DOCTOR) {
+      throw new ForbiddenException('Only doctors can search patients');
     }
 
     if (query.length < 3) {
@@ -356,34 +306,6 @@ export class PatientsService {
         hasPermission: false,
         hasAccess: false,
       }));
-    }
-
-    if (userRole === ProfessionalRole.SECRETARY) {
-      return patients.map((patient) => ({
-        ...patient,
-        createdByDoctorId: patient.doctorCreatorId,
-        hasPermission: false,
-        hasAccess: false,
-      }));
-    }
-
-    if (userRole === ProfessionalRole.ADMIN) {
-      if (!activeClinicId) {
-        return [];
-      }
-
-      const clinicPatientIds = await this.getClinicPatientIds(activeClinicId);
-      const clinicPatientSet = new Set(clinicPatientIds);
-
-      return patients.map((patient) => {
-        const hasAccess = clinicPatientSet.has(patient.id);
-        return {
-          ...patient,
-          createdByDoctorId: patient.doctorCreatorId,
-          hasPermission: hasAccess,
-          hasAccess,
-        };
-      });
     }
 
     const patientIds = patients.map((patient) => patient.id);
