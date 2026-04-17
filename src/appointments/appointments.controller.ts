@@ -22,7 +22,13 @@ export class AppointmentsController {
   @ApiResponse({ status: 403, description: 'Forbidden - No permission' })
   @ApiResponse({ status: 404, description: 'Patient or Dependent not found' })
   async create(@CurrentUser() user: any, @Body() dto: CreateAppointmentDto) {
-    return this.appointmentsService.create(user.userId, user.type, user.role, dto);
+    return this.appointmentsService.create(
+      user.userId,
+      user.type,
+      user.role,
+      user.activeClinicId,
+      dto,
+    );
   }
 
   @Get()

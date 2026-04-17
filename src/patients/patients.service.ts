@@ -286,12 +286,41 @@ export class PatientsService {
     userRole?: string | null,
     activeClinicId?: string | null,
   ) {
-    if (userType !== 'doctor' || userRole !== ProfessionalRole.DOCTOR) {
-      throw new ForbiddenException('Only doctors can search patients');
+    if (userType !== 'doctor') {
+      throw new ForbiddenException('Only professionals can search patients');
     }
 
     if (query.length < 3) {
       throw new ForbiddenException('Search query must be at least 3 characters');
+    }
+
+    if (userRole === ProfessionalRole.SECRETARY || userRole === ProfessionalRole.ADMIN) {
+      if (!activeClinicId) {
+        throw new ForbiddenException('Active clinic context is required to search patients');
+      }
+
+      const clinicPatientIds = await this.getClinicPatientIds(activeClinicId);
+      if (clinicPatientIds.length === 0) {
+        return [];
+      }
+
+      const patients = await this.patientRepository.find({
+        where: [
+          { id: In(clinicPatientIds), name: Like(`%${query}%`) },
+          { id: In(clinicPatientIds), email: Like(`%${query}%`) },
+        ],
+        select: ['id', 'name', 'email'],
+      });
+
+      return patients.map((patient) => ({
+        id: patient.id,
+        name: patient.name,
+        email: patient.email,
+      }));
+    }
+
+    if (userRole !== ProfessionalRole.DOCTOR) {
+      throw new ForbiddenException('Only doctors can search patients');
     }
 
     const patients = await this.patientRepository.find({

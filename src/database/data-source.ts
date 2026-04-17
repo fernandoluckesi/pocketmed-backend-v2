@@ -13,6 +13,8 @@ import { DeviceToken } from '../entities/device-token.entity';
 import { Notification } from '../entities/notification.entity';
 import { Clinic } from '../entities/clinic.entity';
 import { ClinicMembership } from '../entities/clinic-membership.entity';
+import { ClinicAdminProfile } from '../entities/clinic-admin-profile.entity';
+import { SecretaryProfile } from '../entities/secretary-profile.entity';
 
 const AppDataSource = new DataSource({
   type: 'mysql',
@@ -34,6 +36,8 @@ const AppDataSource = new DataSource({
     Notification,
     Clinic,
     ClinicMembership,
+    ClinicAdminProfile,
+    SecretaryProfile,
   ],
   migrations: [__dirname + '/migrations/*{.ts,.js}'],
   synchronize: false,

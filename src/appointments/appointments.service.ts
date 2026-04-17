@@ -65,9 +65,14 @@ export class AppointmentsService {
     userId: string,
     userType: string,
     userRole: string | null,
+    activeClinicId: string | null,
     dto: CreateAppointmentDto,
   ) {
     if (userType === 'doctor') {
+      if (userRole === ProfessionalRole.SECRETARY || userRole === ProfessionalRole.ADMIN) {
+        return this.createByClinicStaff(userRole, activeClinicId, dto);
+      }
+
       if (userRole && userRole !== ProfessionalRole.DOCTOR) {
         throw new ForbiddenException('Only doctors can create appointments');
       }
@@ -79,6 +84,53 @@ export class AppointmentsService {
     }
 
     throw new ForbiddenException('Invalid user type');
+  }
+
+  private async createByClinicStaff(
+    userRole: string,
+    activeClinicId: string | null,
+    dto: CreateAppointmentDto,
+  ) {
+    if (userRole !== ProfessionalRole.SECRETARY && userRole !== ProfessionalRole.ADMIN) {
+      throw new ForbiddenException('Only clinic admin or secretary can use this flow');
+    }
+
+    if (!activeClinicId) {
+      throw new ForbiddenException('Active clinic context is required for this operation');
+    }
+
+    if (!dto.doctorId) {
+      throw new BadRequestException('doctorId is required for clinic staff scheduling');
+    }
+
+    const hasClinicalData =
+      Boolean(dto.isCompleted) ||
+      Boolean(dto.doctorFeedback?.trim()) ||
+      Boolean(dto.doctorInstructions?.trim());
+
+    if (hasClinicalData) {
+      throw new ForbiddenException('Clinic staff cannot include clinical notes in scheduling');
+    }
+
+    const membership = await this.clinicMembershipRepository.findOne({
+      where: {
+        clinicId: activeClinicId,
+        professionalId: dto.doctorId,
+        role: ProfessionalRole.DOCTOR,
+        isActive: true,
+      },
+    });
+
+    if (!membership) {
+      throw new ForbiddenException('Selected doctor is not an active member of your clinic');
+    }
+
+    return this.createByDoctor(dto.doctorId, {
+      ...dto,
+      isCompleted: false,
+      doctorFeedback: undefined,
+      doctorInstructions: undefined,
+    });
   }
 
   private async createByDoctor(doctorId: string, dto: CreateAppointmentDto) {

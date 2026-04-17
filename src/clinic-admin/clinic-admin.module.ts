@@ -7,11 +7,21 @@ import { Clinic } from '../entities/clinic.entity';
 import { Doctor } from '../entities/doctor.entity';
 import { Patient } from '../entities/patient.entity';
 import { DoctorPermission } from '../entities/doctor-permission.entity';
+import { ClinicAdminProfile } from '../entities/clinic-admin-profile.entity';
+import { SecretaryProfile } from '../entities/secretary-profile.entity';
 import { EmailModule } from '../email/email.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([ClinicMembership, Clinic, Doctor, Patient, DoctorPermission]),
+    TypeOrmModule.forFeature([
+      ClinicMembership,
+      Clinic,
+      Doctor,
+      Patient,
+      DoctorPermission,
+      ClinicAdminProfile,
+      SecretaryProfile,
+    ]),
     EmailModule,
   ],
   controllers: [ClinicAdminController],

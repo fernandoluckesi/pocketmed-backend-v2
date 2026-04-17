@@ -19,6 +19,7 @@ import { AddClinicMemberDto } from './dto/add-clinic-member.dto';
 import { CreateShadowDoctorByAdminDto } from './dto/create-shadow-doctor-by-admin.dto';
 import { ListClinicMembersQueryDto } from './dto/list-clinic-members.query.dto';
 import { UpdateClinicMemberRoleDto } from './dto/update-clinic-member-role.dto';
+import { UpdateRoleProfileDto } from './dto/update-role-profile.dto';
 
 @ApiTags('Clinic Admin')
 @Controller('clinic-admin')
@@ -104,5 +105,69 @@ export class ClinicAdminController {
   @ApiResponse({ status: 200, description: 'Doctor lookup returned successfully' })
   async findDoctorByEmail(@CurrentUser() user: any, @Query('email') email: string) {
     return this.clinicAdminService.findDoctorByEmail(user, email);
+  }
+
+  @Get('profiles/admins')
+  @ApiOperation({ summary: 'List clinic admin profiles from active clinic (admins only)' })
+  @ApiResponse({ status: 200, description: 'Clinic admin profiles returned successfully' })
+  async listAdminProfiles(@CurrentUser() user: any) {
+    return this.clinicAdminService.listAdminProfiles(user);
+  }
+
+  @Get('profiles/admins/:profileId')
+  @ApiOperation({ summary: 'Get clinic admin profile by id in active clinic (admins only)' })
+  @ApiResponse({ status: 200, description: 'Clinic admin profile returned successfully' })
+  async getAdminProfile(@CurrentUser() user: any, @Param('profileId') profileId: string) {
+    return this.clinicAdminService.getAdminProfile(user, profileId);
+  }
+
+  @Patch('profiles/admins/:profileId')
+  @ApiOperation({ summary: 'Update clinic admin profile in active clinic (admins only)' })
+  @ApiResponse({ status: 200, description: 'Clinic admin profile updated successfully' })
+  async updateAdminProfile(
+    @CurrentUser() user: any,
+    @Param('profileId') profileId: string,
+    @Body() dto: UpdateRoleProfileDto,
+  ) {
+    return this.clinicAdminService.updateAdminProfile(user, profileId, dto);
+  }
+
+  @Delete('profiles/admins/:profileId')
+  @ApiOperation({ summary: 'Delete clinic admin profile in active clinic (admins only)' })
+  @ApiResponse({ status: 200, description: 'Clinic admin profile deleted successfully' })
+  async deleteAdminProfile(@CurrentUser() user: any, @Param('profileId') profileId: string) {
+    return this.clinicAdminService.deleteAdminProfile(user, profileId);
+  }
+
+  @Get('profiles/secretaries')
+  @ApiOperation({ summary: 'List secretary profiles from active clinic (admins only)' })
+  @ApiResponse({ status: 200, description: 'Secretary profiles returned successfully' })
+  async listSecretaryProfiles(@CurrentUser() user: any) {
+    return this.clinicAdminService.listSecretaryProfiles(user);
+  }
+
+  @Get('profiles/secretaries/:profileId')
+  @ApiOperation({ summary: 'Get secretary profile by id in active clinic (admins only)' })
+  @ApiResponse({ status: 200, description: 'Secretary profile returned successfully' })
+  async getSecretaryProfile(@CurrentUser() user: any, @Param('profileId') profileId: string) {
+    return this.clinicAdminService.getSecretaryProfile(user, profileId);
+  }
+
+  @Patch('profiles/secretaries/:profileId')
+  @ApiOperation({ summary: 'Update secretary profile in active clinic (admins only)' })
+  @ApiResponse({ status: 200, description: 'Secretary profile updated successfully' })
+  async updateSecretaryProfile(
+    @CurrentUser() user: any,
+    @Param('profileId') profileId: string,
+    @Body() dto: UpdateRoleProfileDto,
+  ) {
+    return this.clinicAdminService.updateSecretaryProfile(user, profileId, dto);
+  }
+
+  @Delete('profiles/secretaries/:profileId')
+  @ApiOperation({ summary: 'Delete secretary profile in active clinic (admins only)' })
+  @ApiResponse({ status: 200, description: 'Secretary profile deleted successfully' })
+  async deleteSecretaryProfile(@CurrentUser() user: any, @Param('profileId') profileId: string) {
+    return this.clinicAdminService.deleteSecretaryProfile(user, profileId);
   }
 }

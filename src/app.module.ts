@@ -30,6 +30,8 @@ import { DeviceToken } from './entities/device-token.entity';
 import { Notification } from './entities/notification.entity';
 import { Clinic } from './entities/clinic.entity';
 import { ClinicMembership } from './entities/clinic-membership.entity';
+import { ClinicAdminProfile } from './entities/clinic-admin-profile.entity';
+import { SecretaryProfile } from './entities/secretary-profile.entity';
 import { NotificationsModule } from './notifications/notifications.module';
 import { ClinicAdminModule } from './clinic-admin/clinic-admin.module';
 
@@ -63,6 +65,8 @@ import { ClinicAdminModule } from './clinic-admin/clinic-admin.module';
           Notification,
           Clinic,
           ClinicMembership,
+          ClinicAdminProfile,
+          SecretaryProfile,
         ],
         migrations: [__dirname + '/database/migrations/*{.ts,.js}'],
         synchronize: false,

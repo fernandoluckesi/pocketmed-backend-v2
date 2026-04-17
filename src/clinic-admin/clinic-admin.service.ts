@@ -7,17 +7,21 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
+import * as bcrypt from 'bcrypt';
 import { ClinicMembership } from '../entities/clinic-membership.entity';
 import { Clinic } from '../entities/clinic.entity';
 import { Doctor } from '../entities/doctor.entity';
 import { Patient } from '../entities/patient.entity';
 import { DoctorPermission } from '../entities/doctor-permission.entity';
+import { ClinicAdminProfile } from '../entities/clinic-admin-profile.entity';
+import { SecretaryProfile } from '../entities/secretary-profile.entity';
 import { ProfessionalRole } from '../auth/professional-role.enum';
 import { AddClinicMemberDto } from './dto/add-clinic-member.dto';
 import { CreateShadowDoctorByAdminDto } from './dto/create-shadow-doctor-by-admin.dto';
 import { EmailService } from '../email/email.service';
 import { ListClinicMembersQueryDto } from './dto/list-clinic-members.query.dto';
 import { UpdateClinicMemberRoleDto } from './dto/update-clinic-member-role.dto';
+import { UpdateRoleProfileDto } from './dto/update-role-profile.dto';
 
 @Injectable()
 export class ClinicAdminService {
@@ -32,8 +36,104 @@ export class ClinicAdminService {
     private patientRepository: Repository<Patient>,
     @InjectRepository(DoctorPermission)
     private doctorPermissionRepository: Repository<DoctorPermission>,
+    @InjectRepository(ClinicAdminProfile)
+    private clinicAdminProfileRepository: Repository<ClinicAdminProfile>,
+    @InjectRepository(SecretaryProfile)
+    private secretaryProfileRepository: Repository<SecretaryProfile>,
     private emailService: EmailService,
   ) {}
+
+  private applyProfessionalDataToRoleProfile(
+    profile: ClinicAdminProfile | SecretaryProfile,
+    doctor: Doctor,
+    clinicId: string | null,
+  ) {
+    profile.professionalId = doctor.id;
+    profile.clinicId = clinicId;
+    profile.name = doctor.name;
+    profile.email = doctor.email;
+    profile.password = doctor.password || null;
+    profile.phone = doctor.phone;
+    profile.profileImage = doctor.profileImage || null;
+    profile.gender = doctor.gender || null;
+    profile.birthDate = doctor.birthDate || null;
+    profile.cpf = doctor.cpf || null;
+  }
+
+  private async syncRoleProfiles(professionalId: string) {
+    const professional = await this.doctorRepository.findOne({
+      where: { id: professionalId },
+    });
+
+    if (!professional) {
+      await this.clinicAdminProfileRepository.delete({ professionalId });
+      await this.secretaryProfileRepository.delete({ professionalId });
+      return;
+    }
+
+    const activeMemberships = await this.clinicMembershipRepository.find({
+      where: {
+        professionalId,
+        isActive: true,
+      },
+      order: { createdAt: 'ASC' },
+    });
+
+    const adminMembership = activeMemberships.find((m) => m.role === ProfessionalRole.ADMIN);
+    const secretaryMembership = activeMemberships.find(
+      (m) => m.role === ProfessionalRole.SECRETARY,
+    );
+
+    if (adminMembership) {
+      const existingAdminProfile = await this.clinicAdminProfileRepository.findOne({
+        where: { professionalId },
+      });
+
+      if (existingAdminProfile) {
+        this.applyProfessionalDataToRoleProfile(
+          existingAdminProfile,
+          professional,
+          adminMembership.clinicId,
+        );
+        await this.clinicAdminProfileRepository.save(existingAdminProfile);
+      } else {
+        const createdAdminProfile = this.clinicAdminProfileRepository.create();
+        this.applyProfessionalDataToRoleProfile(
+          createdAdminProfile,
+          professional,
+          adminMembership.clinicId,
+        );
+        await this.clinicAdminProfileRepository.save(createdAdminProfile);
+      }
+    } else {
+      await this.clinicAdminProfileRepository.delete({ professionalId });
+    }
+
+    if (secretaryMembership) {
+      const existingSecretaryProfile = await this.secretaryProfileRepository.findOne({
+        where: { professionalId },
+      });
+
+      if (existingSecretaryProfile) {
+        this.applyProfessionalDataToRoleProfile(
+          existingSecretaryProfile,
+          professional,
+          secretaryMembership.clinicId,
+        );
+        await this.secretaryProfileRepository.save(existingSecretaryProfile);
+      } else {
+        const createdSecretaryProfile = this.secretaryProfileRepository.create();
+        this.applyProfessionalDataToRoleProfile(
+          createdSecretaryProfile,
+          professional,
+          secretaryMembership.clinicId,
+        );
+        await this.secretaryProfileRepository.save(createdSecretaryProfile);
+      }
+    } else {
+      await this.secretaryProfileRepository.delete({ professionalId });
+    }
+  }
 
   private getClinicContext(user: any, allowedRoles: ProfessionalRole[]) {
     if (user.type !== 'doctor') {
@@ -78,6 +178,98 @@ export class ClinicAdminService {
 
   private generateVerificationCode(): string {
     return Math.floor(100000 + Math.random() * 900000).toString();
+  }
+
+  private sanitizeRoleProfile(profile: ClinicAdminProfile | SecretaryProfile) {
+    const { password, ...safeProfile } = profile as any;
+    return safeProfile;
+  }
+
+  private async ensureUniqueProfileEmail(
+    email: string,
+    currentProfileId: string,
+    role: ProfessionalRole,
+  ) {
+    const normalizedEmail = email.trim().toLowerCase();
+
+    const adminWithEmail = await this.clinicAdminProfileRepository.findOne({
+      where: { email: normalizedEmail },
+      select: ['id'],
+    });
+    if (adminWithEmail && adminWithEmail.id !== currentProfileId) {
+      throw new ConflictException('Email already in use by another clinic admin profile');
+    }
+
+    const secretaryWithEmail = await this.secretaryProfileRepository.findOne({
+      where: { email: normalizedEmail },
+      select: ['id'],
+    });
+    if (secretaryWithEmail && secretaryWithEmail.id !== currentProfileId) {
+      throw new ConflictException('Email already in use by another secretary profile');
+    }
+
+    const professionalWithEmail = await this.doctorRepository.findOne({
+      where: { email: normalizedEmail },
+      select: ['id'],
+    });
+    if (professionalWithEmail) {
+      const currentProfile =
+        role === ProfessionalRole.ADMIN
+          ? await this.clinicAdminProfileRepository.findOne({ where: { id: currentProfileId } })
+          : await this.secretaryProfileRepository.findOne({ where: { id: currentProfileId } });
+
+      if (
+        !currentProfile?.professionalId ||
+        professionalWithEmail.id !== currentProfile.professionalId
+      ) {
+        throw new ConflictException('Email already in use by another professional');
+      }
+    }
+  }
+
+  private async applyRoleProfileUpdate(
+    profile: ClinicAdminProfile | SecretaryProfile,
+    dto: UpdateRoleProfileDto,
+    role: ProfessionalRole,
+  ) {
+    if (dto.email) {
+      await this.ensureUniqueProfileEmail(dto.email, profile.id, role);
+      profile.email = dto.email.trim().toLowerCase();
+    }
+
+    if (dto.name) {
+      profile.name = dto.name.trim();
+    }
+
+    if (dto.phone) {
+      profile.phone = dto.phone.trim();
+    }
+
+    if (dto.password) {
+      profile.password = await bcrypt.hash(dto.password, 10);
+    }
+  }
+
+  private async syncRoleProfileToProfessional(profile: ClinicAdminProfile | SecretaryProfile) {
+    if (!profile.professionalId) {
+      return;
+    }
+
+    const professional = await this.doctorRepository.findOne({
+      where: { id: profile.professionalId },
+    });
+    if (!professional) {
+      return;
+    }
+
+    professional.name = profile.name;
+    professional.email = profile.email || professional.email;
+    professional.phone = profile.phone;
+    if (profile.password) {
+      professional.password = profile.password;
+    }
+
+    await this.doctorRepository.save(professional);
   }
 
   async getOverview(user: any) {
@@ -224,6 +416,7 @@ export class ClinicAdminService {
 
     membership.role = dto.role;
     const updated = await this.clinicMembershipRepository.save(membership);
+    await this.syncRoleProfiles(updated.professionalId);
 
     return {
       id: updated.id,
@@ -238,53 +431,152 @@ export class ClinicAdminService {
   async addMember(user: any, dto: AddClinicMemberDto) {
     const { clinicId, adminId } = this.getAdminContext(user);
 
-    const normalizedEmail = dto.professionalEmail.trim().toLowerCase();
-    const doctor = await this.doctorRepository.findOne({ where: { email: normalizedEmail } });
+    if (dto.role === ProfessionalRole.DOCTOR) {
+      let doctor: Doctor | null = null;
 
-    if (!doctor) {
-      throw new NotFoundException('Professional not found with this email');
-    }
+      if (dto.professionalId) {
+        doctor = await this.doctorRepository.findOne({ where: { id: dto.professionalId } });
+      }
 
-    const existingMembership = await this.clinicMembershipRepository.findOne({
-      where: {
+      if (!doctor && dto.professionalEmail) {
+        const normalizedEmail = dto.professionalEmail.trim().toLowerCase();
+        doctor = await this.doctorRepository.findOne({ where: { email: normalizedEmail } });
+      }
+
+      if (!doctor) {
+        throw new NotFoundException('Doctor not found with provided data');
+      }
+
+      const existingMembership = await this.clinicMembershipRepository.findOne({
+        where: {
+          clinicId,
+          professionalId: doctor.id,
+        },
+      });
+
+      if (existingMembership?.isActive) {
+        throw new ConflictException('Professional is already an active member of this clinic');
+      }
+
+      if (existingMembership) {
+        existingMembership.role = ProfessionalRole.DOCTOR;
+        existingMembership.isActive = true;
+        existingMembership.invitedBy = adminId;
+        const reactivated = await this.clinicMembershipRepository.save(existingMembership);
+        await this.syncRoleProfiles(reactivated.professionalId);
+        return {
+          id: reactivated.id,
+          role: reactivated.role,
+          isActive: reactivated.isActive,
+          professional: this.sanitizeDoctor(doctor),
+        };
+      }
+
+      const membership = this.clinicMembershipRepository.create({
         clinicId,
         professionalId: doctor.id,
-      },
-    });
+        role: ProfessionalRole.DOCTOR,
+        isActive: true,
+        invitedBy: adminId,
+      });
 
-    if (existingMembership?.isActive) {
-      throw new ConflictException('Professional is already an active member of this clinic');
-    }
+      const saved = await this.clinicMembershipRepository.save(membership);
+      await this.syncRoleProfiles(saved.professionalId);
 
-    if (existingMembership) {
-      existingMembership.role = dto.role;
-      existingMembership.isActive = true;
-      existingMembership.invitedBy = adminId;
-      const reactivated = await this.clinicMembershipRepository.save(existingMembership);
       return {
-        id: reactivated.id,
-        role: reactivated.role,
-        isActive: reactivated.isActive,
+        id: saved.id,
+        role: saved.role,
+        isActive: saved.isActive,
         professional: this.sanitizeDoctor(doctor),
       };
     }
 
-    const membership = this.clinicMembershipRepository.create({
-      clinicId,
-      professionalId: doctor.id,
-      role: dto.role,
-      isActive: true,
-      invitedBy: adminId,
-    });
+    if (dto.role === ProfessionalRole.SECRETARY) {
+      if (!dto.name?.trim() || !dto.email?.trim() || !dto.phone?.trim()) {
+        throw new BadRequestException('For secretary, name, email and phone are required');
+      }
 
-    const saved = await this.clinicMembershipRepository.save(membership);
+      const normalizedEmail = dto.email.trim().toLowerCase();
 
-    return {
-      id: saved.id,
-      role: saved.role,
-      isActive: saved.isActive,
-      professional: this.sanitizeDoctor(doctor),
-    };
+      const existingDoctor = await this.doctorRepository.findOne({
+        where: { email: normalizedEmail },
+      });
+      if (existingDoctor) {
+        throw new ConflictException('Email already registered');
+      }
+
+      const existingPatient = await this.patientRepository.findOne({
+        where: { email: normalizedEmail },
+      });
+      if (existingPatient) {
+        throw new ConflictException('Email already registered');
+      }
+
+      const existingAdminProfile = await this.clinicAdminProfileRepository.findOne({
+        where: { email: normalizedEmail },
+      });
+      if (existingAdminProfile) {
+        throw new ConflictException('Email already registered');
+      }
+
+      const existingSecretaryProfile = await this.secretaryProfileRepository.findOne({
+        where: { email: normalizedEmail },
+      });
+      if (existingSecretaryProfile) {
+        throw new ConflictException('Email already registered');
+      }
+
+      const verificationCode = this.generateVerificationCode();
+      const verificationCodeExpiry = new Date(Date.now() + 15 * 60 * 1000);
+      const suffix = Date.now().toString().slice(-8);
+
+      const shadowSecretary = this.doctorRepository.create({
+        name: dto.name.trim(),
+        email: normalizedEmail,
+        phone: dto.phone.trim(),
+        gender: 'not_informed',
+        birthDate: new Date('1990-01-01'),
+        specialty: 'Secretaria',
+        crm: `SEC${suffix}`,
+        cpf: `000.000.${suffix.slice(0, 3)}-${suffix.slice(3, 5)}`,
+        profileImage: null,
+        type: 'doctor',
+        isShadow: true,
+        password: null,
+        verificationCode,
+        verificationCodeExpiry,
+      });
+
+      const savedSecretaryProfessional = await this.doctorRepository.save(shadowSecretary);
+
+      const membership = this.clinicMembershipRepository.create({
+        clinicId,
+        professionalId: savedSecretaryProfessional.id,
+        role: ProfessionalRole.SECRETARY,
+        isActive: true,
+        invitedBy: adminId,
+      });
+
+      const savedMembership = await this.clinicMembershipRepository.save(membership);
+      await this.syncRoleProfiles(savedMembership.professionalId);
+
+      await this.emailService.sendVerificationCode(
+        normalizedEmail,
+        verificationCode,
+        savedSecretaryProfessional.name,
+      );
+
+      return {
+        id: savedMembership.id,
+        role: savedMembership.role,
+        isActive: savedMembership.isActive,
+        professional: this.sanitizeDoctor(savedSecretaryProfessional),
+        message:
+          'Secretary created successfully. Verification code sent to email for first access.',
+      };
+    }
+
+    throw new BadRequestException('Only doctor and secretary roles can be added here');
   }
 
   async removeMember(user: any, membershipId: string) {
@@ -318,7 +610,8 @@ export class ClinicAdminService {
     }
 
     membership.isActive = false;
-    await this.clinicMembershipRepository.save(membership);
+    const updatedMembership = await this.clinicMembershipRepository.save(membership);
+    await this.syncRoleProfiles(updatedMembership.professionalId);
 
     return {
       message: 'Clinic member removed successfully',
@@ -631,6 +924,134 @@ export class ClinicAdminService {
     return {
       ...this.sanitizeDoctor(doctor),
       isClinicMember: Boolean(membership),
+    };
+  }
+
+  async listAdminProfiles(user: any) {
+    const { clinicId } = this.getAdminContext(user);
+
+    const profiles = await this.clinicAdminProfileRepository.find({
+      where: { clinicId },
+      order: { createdAt: 'ASC' },
+    });
+
+    return profiles.map((profile) => this.sanitizeRoleProfile(profile));
+  }
+
+  async getAdminProfile(user: any, profileId: string) {
+    const { clinicId } = this.getAdminContext(user);
+
+    const profile = await this.clinicAdminProfileRepository.findOne({
+      where: { id: profileId, clinicId },
+    });
+
+    if (!profile) {
+      throw new NotFoundException('Clinic admin profile not found in active clinic');
+    }
+
+    return this.sanitizeRoleProfile(profile);
+  }
+
+  async updateAdminProfile(user: any, profileId: string, dto: UpdateRoleProfileDto) {
+    const { clinicId } = this.getAdminContext(user);
+
+    const profile = await this.clinicAdminProfileRepository.findOne({
+      where: { id: profileId, clinicId },
+    });
+
+    if (!profile) {
+      throw new NotFoundException('Clinic admin profile not found in active clinic');
+    }
+
+    await this.applyRoleProfileUpdate(profile, dto, ProfessionalRole.ADMIN);
+    const saved = await this.clinicAdminProfileRepository.save(profile);
+    await this.syncRoleProfileToProfessional(saved);
+
+    return this.sanitizeRoleProfile(saved);
+  }
+
+  async deleteAdminProfile(user: any, profileId: string) {
+    const { clinicId, adminId } = this.getAdminContext(user);
+
+    const profile = await this.clinicAdminProfileRepository.findOne({
+      where: { id: profileId, clinicId },
+    });
+
+    if (!profile) {
+      throw new NotFoundException('Clinic admin profile not found in active clinic');
+    }
+
+    if (profile.professionalId === adminId) {
+      throw new BadRequestException('You cannot delete your own admin profile');
+    }
+
+    await this.clinicAdminProfileRepository.delete({ id: profile.id });
+
+    return {
+      message: 'Clinic admin profile deleted successfully',
+      id: profile.id,
+    };
+  }
+
+  async listSecretaryProfiles(user: any) {
+    const { clinicId } = this.getAdminContext(user);
+
+    const profiles = await this.secretaryProfileRepository.find({
+      where: { clinicId },
+      order: { createdAt: 'ASC' },
+    });
+
+    return profiles.map((profile) => this.sanitizeRoleProfile(profile));
+  }
+
+  async getSecretaryProfile(user: any, profileId: string) {
+    const { clinicId } = this.getAdminContext(user);
+
+    const profile = await this.secretaryProfileRepository.findOne({
+      where: { id: profileId, clinicId },
+    });
+
+    if (!profile) {
+      throw new NotFoundException('Secretary profile not found in active clinic');
+    }
+
+    return this.sanitizeRoleProfile(profile);
+  }
+
+  async updateSecretaryProfile(user: any, profileId: string, dto: UpdateRoleProfileDto) {
+    const { clinicId } = this.getAdminContext(user);
+
+    const profile = await this.secretaryProfileRepository.findOne({
+      where: { id: profileId, clinicId },
+    });
+
+    if (!profile) {
+      throw new NotFoundException('Secretary profile not found in active clinic');
+    }
+
+    await this.applyRoleProfileUpdate(profile, dto, ProfessionalRole.SECRETARY);
+    const saved = await this.secretaryProfileRepository.save(profile);
+    await this.syncRoleProfileToProfessional(saved);
+
+    return this.sanitizeRoleProfile(saved);
+  }
+
+  async deleteSecretaryProfile(user: any, profileId: string) {
+    const { clinicId } = this.getAdminContext(user);
+
+    const profile = await this.secretaryProfileRepository.findOne({
+      where: { id: profileId, clinicId },
+    });
+
+    if (!profile) {
+      throw new NotFoundException('Secretary profile not found in active clinic');
+    }
+
+    await this.secretaryProfileRepository.delete({ id: profile.id });
+
+    return {
+      message: 'Secretary profile deleted successfully',
+      id: profile.id,
     };
   }
 }

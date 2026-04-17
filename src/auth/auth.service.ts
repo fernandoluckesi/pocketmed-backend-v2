@@ -18,6 +18,8 @@ import { LoginDto } from './dto/login.dto';
 import { UploadService } from '../upload/upload.service';
 import { EmailService } from '../email/email.service';
 import { ClinicMembership } from '../entities/clinic-membership.entity';
+import { ClinicAdminProfile } from '../entities/clinic-admin-profile.entity';
+import { SecretaryProfile } from '../entities/secretary-profile.entity';
 import { ProfessionalRole } from './professional-role.enum';
 
 type AuthUser = Patient | Doctor;
@@ -26,6 +28,8 @@ type DoctorAuthContext = {
   role: ProfessionalRole;
   activeClinicId: string | null;
 };
+
+type LoginUser = AuthUser | ClinicAdminProfile | SecretaryProfile;
 
 @Injectable()
 export class AuthService {
@@ -36,6 +40,10 @@ export class AuthService {
     private doctorRepository: Repository<Doctor>,
     @InjectRepository(ClinicMembership)
     private clinicMembershipRepository: Repository<ClinicMembership>,
+    @InjectRepository(ClinicAdminProfile)
+    private clinicAdminProfileRepository: Repository<ClinicAdminProfile>,
+    @InjectRepository(SecretaryProfile)
+    private secretaryProfileRepository: Repository<SecretaryProfile>,
     private jwtService: JwtService,
     private uploadService: UploadService,
     private emailService: EmailService,
@@ -222,11 +230,49 @@ export class AuthService {
   }
 
   async login(dto: LoginDto) {
-    const user = await this.findUserByEmail(dto.email);
+    const loginUser = await this.findLoginUserByEmail(dto.email);
 
-    if (!user) {
+    if (!loginUser) {
       throw new UnauthorizedException('Invalid credentials');
     }
+
+    if (this.isRoleProfile(loginUser)) {
+      if (!loginUser.password) {
+        throw new UnauthorizedException('Invalid credentials');
+      }
+
+      const isPasswordValid = await bcrypt.compare(dto.password, loginUser.password);
+
+      if (!isPasswordValid) {
+        throw new UnauthorizedException('Invalid credentials');
+      }
+
+      if (!loginUser.professionalId) {
+        throw new UnauthorizedException('Role profile is not linked to a professional account');
+      }
+
+      const professional = await this.doctorRepository.findOne({
+        where: { id: loginUser.professionalId },
+      });
+
+      if (!professional) {
+        throw new UnauthorizedException('Invalid credentials');
+      }
+
+      if (professional.isShadow) {
+        throw new UnauthorizedException('Shadow account needs to be activated first');
+      }
+
+      const token = await this.generateToken(professional);
+      const doctorContext = await this.getDoctorAuthContext(professional.id);
+
+      return {
+        user: this.sanitizeUser(professional, doctorContext),
+        token,
+      };
+    }
+
+    const user = loginUser;
 
     if (user.isShadow) {
       throw new UnauthorizedException('Shadow account needs to be activated first');
@@ -419,6 +465,35 @@ export class AuthService {
     };
   }
 
+  private isRoleProfile(user: LoginUser): user is ClinicAdminProfile | SecretaryProfile {
+    return !('type' in user);
+  }
+
+  private async findLoginUserByEmail(email: string): Promise<LoginUser | null> {
+    const normalizedEmail = email.trim().toLowerCase();
+
+    const patient = await this.patientRepository.findOne({ where: { email: normalizedEmail } });
+    if (patient) {
+      return patient;
+    }
+
+    const clinicAdmin = await this.clinicAdminProfileRepository.findOne({
+      where: { email: normalizedEmail },
+    });
+    if (clinicAdmin) {
+      return clinicAdmin;
+    }
+
+    const secretary = await this.secretaryProfileRepository.findOne({
+      where: { email: normalizedEmail },
+    });
+    if (secretary) {
+      return secretary;
+    }
+
+    return this.doctorRepository.findOne({ where: { email: normalizedEmail } });
+  }
+
   private async findUserByEmail(email: string): Promise<AuthUser | null> {
     const patient = await this.patientRepository.findOne({ where: { email } });
     if (patient) {
@@ -445,9 +520,27 @@ export class AuthService {
     return this.doctorRepository.findOne({ where: { id: userId } });
   }
 
+  private async syncProfessionalDataToRoleProfiles(doctor: Doctor): Promise<void> {
+    const updatedFields = {
+      name: doctor.name,
+      email: doctor.email,
+      password: doctor.password || null,
+      phone: doctor.phone,
+      profileImage: doctor.profileImage || null,
+      gender: doctor.gender || null,
+      birthDate: doctor.birthDate || null,
+      cpf: doctor.cpf || null,
+    };
+
+    await this.clinicAdminProfileRepository.update({ professionalId: doctor.id }, updatedFields);
+    await this.secretaryProfileRepository.update({ professionalId: doctor.id }, updatedFields);
+  }
+
   private async saveUser(user: AuthUser): Promise<AuthUser> {
     if (user.type === 'doctor') {
-      return this.doctorRepository.save(user as Doctor);
+      const savedDoctor = await this.doctorRepository.save(user as Doctor);
+      await this.syncProfessionalDataToRoleProfiles(savedDoctor);
+      return savedDoctor;
     }
 
     return this.patientRepository.save(user as Patient);
