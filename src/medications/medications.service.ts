@@ -10,6 +10,7 @@ import { Medication } from '../entities/medication.entity';
 import { Doctor } from '../entities/doctor.entity';
 import { Patient } from '../entities/patient.entity';
 import { Dependent } from '../entities/dependent.entity';
+import { Appointment } from '../entities/appointment.entity';
 import { DoctorsService } from '../doctors/doctors.service';
 import { CreateMedicationDto } from './dto/create-medication.dto';
 import { UpdateMedicationDto } from './dto/update-medication.dto';
@@ -25,10 +26,22 @@ export class MedicationsService {
     private patientRepository: Repository<Patient>,
     @InjectRepository(Dependent)
     private dependentRepository: Repository<Dependent>,
+    @InjectRepository(Appointment)
+    private appointmentRepository: Repository<Appointment>,
     private doctorsService: DoctorsService,
   ) {}
 
-  async create(doctorId: string, dto: CreateMedicationDto) {
+  async create(userId: string, userType: string, dto: CreateMedicationDto) {
+    if (userType === 'patient') {
+      return this.createByPatient(userId, dto);
+    }
+
+    if (userType !== 'doctor') {
+      throw new ForbiddenException('Only doctors and patients can create medications');
+    }
+
+    const doctorId = userId;
+
     if (!dto.patientId && !dto.dependentId) {
       throw new BadRequestException('Either patientId or dependentId must be provided');
     }
@@ -80,6 +93,42 @@ export class MedicationsService {
     const medication = this.medicationRepository.create({
       ...dto,
       doctorId,
+      startDate: new Date(dto.startDate),
+      endDate: dto.endDate ? new Date(dto.endDate) : null,
+    });
+
+    return await this.medicationRepository.save(medication);
+  }
+
+  private async createByPatient(patientUserId: string, dto: CreateMedicationDto) {
+    if (!dto.appointmentId) {
+      throw new BadRequestException('appointmentId is required when patient creates medication');
+    }
+
+    const appointment = await this.appointmentRepository.findOne({
+      where: { id: dto.appointmentId },
+      relations: ['dependent', 'dependent.responsibles'],
+    });
+
+    if (!appointment) {
+      throw new NotFoundException('Appointment not found');
+    }
+
+    const isOwnerPatient = appointment.patientId === patientUserId;
+    const isResponsibleDependent =
+      Boolean(appointment.dependentId) &&
+      Boolean(appointment.dependent?.responsibles?.some((r) => r.id === patientUserId));
+
+    if (!isOwnerPatient && !isResponsibleDependent) {
+      throw new ForbiddenException('You can only create medication linked to your own appointment');
+    }
+
+    const medication = this.medicationRepository.create({
+      ...dto,
+      doctorId: appointment.doctorId,
+      patientId: appointment.patientId,
+      dependentId: appointment.dependentId,
+      appointmentId: appointment.id,
       startDate: new Date(dto.startDate),
       endDate: dto.endDate ? new Date(dto.endDate) : null,
     });
@@ -149,15 +198,34 @@ export class MedicationsService {
   async update(id: string, userId: string, userType: string, dto: UpdateMedicationDto) {
     const medication = await this.medicationRepository.findOne({
       where: { id },
-      relations: ['dependent', 'dependent.responsibles'],
+      relations: [
+        'dependent',
+        'dependent.responsibles',
+        'appointment',
+        'appointment.dependent',
+        'appointment.dependent.responsibles',
+      ],
     });
 
     if (!medication) {
       throw new NotFoundException('Medication not found');
     }
 
-    if (userType !== 'doctor' || medication.doctorId !== userId) {
-      throw new ForbiddenException('Only the doctor who created the medication can update it');
+    const isOwnerDoctor = userType === 'doctor' && medication.doctorId === userId;
+
+    const isOwnerPatient =
+      userType === 'patient' &&
+      (medication.patientId === userId ||
+        (medication.dependentId &&
+          medication.dependent?.responsibles?.some((r) => r.id === userId)) ||
+        medication.appointment?.patientId === userId ||
+        (medication.appointment?.dependentId &&
+          medication.appointment.dependent?.responsibles?.some((r) => r.id === userId)));
+
+    if (!isOwnerDoctor && !isOwnerPatient) {
+      throw new ForbiddenException(
+        'Only the doctor who created the medication or the patient who owns it can update it',
+      );
     }
 
     Object.assign(medication, dto);
@@ -176,14 +244,34 @@ export class MedicationsService {
   async delete(id: string, userId: string, userType: string) {
     const medication = await this.medicationRepository.findOne({
       where: { id },
+      relations: [
+        'dependent',
+        'dependent.responsibles',
+        'appointment',
+        'appointment.dependent',
+        'appointment.dependent.responsibles',
+      ],
     });
 
     if (!medication) {
       throw new NotFoundException('Medication not found');
     }
 
-    if (userType !== 'doctor' || medication.doctorId !== userId) {
-      throw new ForbiddenException('Only the doctor who created the medication can delete it');
+    const isOwnerDoctor = userType === 'doctor' && medication.doctorId === userId;
+
+    const isOwnerPatient =
+      userType === 'patient' &&
+      (medication.patientId === userId ||
+        (medication.dependentId &&
+          medication.dependent?.responsibles?.some((r) => r.id === userId)) ||
+        medication.appointment?.patientId === userId ||
+        (medication.appointment?.dependentId &&
+          medication.appointment.dependent?.responsibles?.some((r) => r.id === userId)));
+
+    if (!isOwnerDoctor && !isOwnerPatient) {
+      throw new ForbiddenException(
+        'Only the doctor who created the medication or the patient who owns it can delete it',
+      );
     }
 
     await this.medicationRepository.remove(medication);

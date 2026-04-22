@@ -28,9 +28,9 @@ export class ExamsController {
   constructor(private examsService: ExamsService) {}
 
   @Post()
-  @Roles('doctor')
+  @Roles('doctor', 'patient')
   @UseInterceptors(FileInterceptor('resultFile'))
-  @ApiOperation({ summary: 'Create exam (doctors only)' })
+  @ApiOperation({ summary: 'Create exam (doctor or patient owner)' })
   @ApiConsumes('multipart/form-data')
   @ApiResponse({ status: 201, description: 'Exam created successfully' })
   @ApiResponse({ status: 403, description: 'Forbidden - No permission' })
@@ -40,7 +40,7 @@ export class ExamsController {
     @Body() dto: CreateExamDto,
     @UploadedFile() file?: Express.Multer.File,
   ) {
-    return this.examsService.create(user.userId, dto, file);
+    return this.examsService.create(user.userId, user.type, dto, file);
   }
 
   @Get()
@@ -60,9 +60,9 @@ export class ExamsController {
   }
 
   @Put(':id')
-  @Roles('doctor')
+  @Roles('doctor', 'patient')
   @UseInterceptors(FileInterceptor('resultFile'))
-  @ApiOperation({ summary: 'Update exam (doctor who created only)' })
+  @ApiOperation({ summary: 'Update exam (doctor creator or patient owner)' })
   @ApiConsumes('multipart/form-data')
   @ApiResponse({ status: 200, description: 'Exam updated successfully' })
   @ApiResponse({ status: 403, description: 'Forbidden' })
@@ -77,8 +77,8 @@ export class ExamsController {
   }
 
   @Delete(':id')
-  @Roles('doctor')
-  @ApiOperation({ summary: 'Delete exam (doctor who created only)' })
+  @Roles('doctor', 'patient')
+  @ApiOperation({ summary: 'Delete exam (doctor creator or patient owner)' })
   @ApiResponse({ status: 200, description: 'Exam deleted successfully' })
   @ApiResponse({ status: 403, description: 'Forbidden' })
   @ApiResponse({ status: 404, description: 'Exam not found' })

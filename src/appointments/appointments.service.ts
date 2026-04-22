@@ -279,9 +279,10 @@ export class AppointmentsService {
       doctorSpecialty,
       reason: dto.reason,
       dateTime: new Date(dto.dateTime),
-      isCompleted: false,
+      isCompleted: dto.isCompleted || false,
       doctorId,
       patientId: dto.dependentId ? null : patientId,
+      createdByPatientId: patientId,
       dependentId: dto.dependentId,
       status: AppointmentStatus.APPROVED,
     });
@@ -360,7 +361,12 @@ export class AppointmentsService {
           .getMany();
       }
 
-      return [...patientAppointments, ...dependentAppointments];
+      const appointmentMap = new Map<string, Appointment>();
+      [...patientAppointments, ...dependentAppointments].forEach((appointment) => {
+        appointmentMap.set(appointment.id, appointment);
+      });
+
+      return Array.from(appointmentMap.values());
     }
 
     return [];
@@ -423,7 +429,9 @@ export class AppointmentsService {
       appointment.doctorId === userId;
 
     const isOwnerPatient =
-      userType === 'patient' && appointment.patientId === userId && !appointment.isCompleted;
+      userType === 'patient' &&
+      (appointment.createdByPatientId === userId ||
+        (!appointment.createdByPatientId && appointment.patientId === userId));
 
     if (!isOwnerDoctor && !isOwnerPatient) {
       throw new ForbiddenException(
@@ -459,16 +467,14 @@ export class AppointmentsService {
       throw new ForbiddenException('Only patients can respond to appointments');
     }
 
-    if (appointment.patientId && appointment.patientId !== userId) {
-      throw new ForbiddenException('You can only respond to your own appointments');
-    }
-
     if (appointment.dependentId) {
       const isResponsible = appointment.dependent.responsibles.some((r) => r.id === userId);
 
       if (!isResponsible) {
         throw new ForbiddenException('You are not responsible for this dependent');
       }
+    } else if (appointment.patientId && appointment.patientId !== userId) {
+      throw new ForbiddenException('You can only respond to your own appointments');
     }
 
     appointment.status = status;
@@ -489,12 +495,20 @@ export class AppointmentsService {
       throw new NotFoundException('Appointment not found');
     }
 
-    if (
-      userType !== 'doctor' ||
-      userRole !== ProfessionalRole.DOCTOR ||
-      appointment.doctorId !== userId
-    ) {
-      throw new ForbiddenException('Only the doctor who created the appointment can delete it');
+    const isOwnerDoctor =
+      userType === 'doctor' &&
+      userRole === ProfessionalRole.DOCTOR &&
+      appointment.doctorId === userId;
+
+    const isOwnerPatient =
+      userType === 'patient' &&
+      (appointment.createdByPatientId === userId ||
+        (!appointment.createdByPatientId && appointment.patientId === userId));
+
+    if (!isOwnerDoctor && !isOwnerPatient) {
+      throw new ForbiddenException(
+        'Only the doctor who created the appointment or the patient who owns it can delete it',
+      );
     }
 
     await this.appointmentRepository.remove(appointment);

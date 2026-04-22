@@ -72,6 +72,13 @@ export class Appointment {
   patient: Patient;
 
   @Column({ type: 'uuid', nullable: true })
+  createdByPatientId: string;
+
+  @ManyToOne(() => Patient, { nullable: true })
+  @JoinColumn({ name: 'createdByPatientId' })
+  createdByPatient: Patient;
+
+  @Column({ type: 'uuid', nullable: true })
   dependentId: string;
 
   @ManyToOne(() => Dependent, (dependent) => dependent.appointments, { nullable: true })

@@ -81,8 +81,8 @@ export class AppointmentsController {
   }
 
   @Delete(':id')
-  @Roles('doctor')
-  @ApiOperation({ summary: 'Delete appointment (doctor who created only)' })
+  @Roles('doctor', 'patient')
+  @ApiOperation({ summary: 'Delete appointment (doctor creator or patient owner)' })
   @ApiResponse({ status: 200, description: 'Appointment deleted successfully' })
   @ApiResponse({ status: 403, description: 'Forbidden' })
   @ApiResponse({ status: 404, description: 'Appointment not found' })

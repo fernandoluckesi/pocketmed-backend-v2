@@ -6,12 +6,13 @@ import { Exam } from '../entities/exam.entity';
 import { Doctor } from '../entities/doctor.entity';
 import { Patient } from '../entities/patient.entity';
 import { Dependent } from '../entities/dependent.entity';
+import { Appointment } from '../entities/appointment.entity';
 import { DoctorsModule } from '../doctors/doctors.module';
 import { UploadModule } from '../upload/upload.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Exam, Doctor, Patient, Dependent]),
+    TypeOrmModule.forFeature([Exam, Doctor, Patient, Dependent, Appointment]),
     DoctorsModule,
     UploadModule,
   ],

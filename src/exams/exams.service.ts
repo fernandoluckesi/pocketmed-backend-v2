@@ -10,6 +10,7 @@ import { Exam } from '../entities/exam.entity';
 import { Doctor } from '../entities/doctor.entity';
 import { Patient } from '../entities/patient.entity';
 import { Dependent } from '../entities/dependent.entity';
+import { Appointment } from '../entities/appointment.entity';
 import { DoctorsService } from '../doctors/doctors.service';
 import { UploadService } from '../upload/upload.service';
 import { CreateExamDto } from './dto/create-exam.dto';
@@ -26,11 +27,23 @@ export class ExamsService {
     private patientRepository: Repository<Patient>,
     @InjectRepository(Dependent)
     private dependentRepository: Repository<Dependent>,
+    @InjectRepository(Appointment)
+    private appointmentRepository: Repository<Appointment>,
     private doctorsService: DoctorsService,
     private uploadService: UploadService,
   ) {}
 
-  async create(doctorId: string, dto: CreateExamDto, file?: Express.Multer.File) {
+  async create(userId: string, userType: string, dto: CreateExamDto, file?: Express.Multer.File) {
+    if (userType === 'patient') {
+      return this.createByPatient(userId, dto, file);
+    }
+
+    if (userType !== 'doctor') {
+      throw new ForbiddenException('Only doctors and patients can create exams');
+    }
+
+    const doctorId = userId;
+
     if (!dto.patientId && !dto.dependentId) {
       throw new BadRequestException('Either patientId or dependentId must be provided');
     }
@@ -87,6 +100,51 @@ export class ExamsService {
     const exam = this.examRepository.create({
       ...dto,
       doctorId,
+      scheduledDate: dto.scheduledDate ? new Date(dto.scheduledDate) : null,
+      resultFile: resultFileUrl,
+    });
+
+    return await this.examRepository.save(exam);
+  }
+
+  private async createByPatient(
+    patientUserId: string,
+    dto: CreateExamDto,
+    file?: Express.Multer.File,
+  ) {
+    if (!dto.appointmentId) {
+      throw new BadRequestException('appointmentId is required when patient creates exam');
+    }
+
+    const appointment = await this.appointmentRepository.findOne({
+      where: { id: dto.appointmentId },
+      relations: ['dependent', 'dependent.responsibles'],
+    });
+
+    if (!appointment) {
+      throw new NotFoundException('Appointment not found');
+    }
+
+    const isOwnerPatient = appointment.patientId === patientUserId;
+    const isResponsibleDependent =
+      Boolean(appointment.dependentId) &&
+      Boolean(appointment.dependent?.responsibles?.some((r) => r.id === patientUserId));
+
+    if (!isOwnerPatient && !isResponsibleDependent) {
+      throw new ForbiddenException('You can only create exam linked to your own appointment');
+    }
+
+    let resultFileUrl = null;
+    if (file) {
+      resultFileUrl = await this.uploadService.uploadFile(file, 'exam-results');
+    }
+
+    const exam = this.examRepository.create({
+      ...dto,
+      doctorId: appointment.doctorId,
+      patientId: appointment.patientId,
+      dependentId: appointment.dependentId,
+      appointmentId: appointment.id,
       scheduledDate: dto.scheduledDate ? new Date(dto.scheduledDate) : null,
       resultFile: resultFileUrl,
     });
@@ -162,15 +220,33 @@ export class ExamsService {
   ) {
     const exam = await this.examRepository.findOne({
       where: { id },
-      relations: ['dependent', 'dependent.responsibles'],
+      relations: [
+        'dependent',
+        'dependent.responsibles',
+        'appointment',
+        'appointment.dependent',
+        'appointment.dependent.responsibles',
+      ],
     });
 
     if (!exam) {
       throw new NotFoundException('Exam not found');
     }
 
-    if (userType !== 'doctor' || exam.doctorId !== userId) {
-      throw new ForbiddenException('Only the doctor who created the exam can update it');
+    const isOwnerDoctor = userType === 'doctor' && exam.doctorId === userId;
+
+    const isOwnerPatient =
+      userType === 'patient' &&
+      (exam.patientId === userId ||
+        (exam.dependentId && exam.dependent?.responsibles?.some((r) => r.id === userId)) ||
+        exam.appointment?.patientId === userId ||
+        (exam.appointment?.dependentId &&
+          exam.appointment.dependent?.responsibles?.some((r) => r.id === userId)));
+
+    if (!isOwnerDoctor && !isOwnerPatient) {
+      throw new ForbiddenException(
+        'Only the doctor who created the exam or the patient who owns it can update it',
+      );
     }
 
     Object.assign(exam, dto);
@@ -192,14 +268,33 @@ export class ExamsService {
   async delete(id: string, userId: string, userType: string) {
     const exam = await this.examRepository.findOne({
       where: { id },
+      relations: [
+        'dependent',
+        'dependent.responsibles',
+        'appointment',
+        'appointment.dependent',
+        'appointment.dependent.responsibles',
+      ],
     });
 
     if (!exam) {
       throw new NotFoundException('Exam not found');
     }
 
-    if (userType !== 'doctor' || exam.doctorId !== userId) {
-      throw new ForbiddenException('Only the doctor who created the exam can delete it');
+    const isOwnerDoctor = userType === 'doctor' && exam.doctorId === userId;
+
+    const isOwnerPatient =
+      userType === 'patient' &&
+      (exam.patientId === userId ||
+        (exam.dependentId && exam.dependent?.responsibles?.some((r) => r.id === userId)) ||
+        exam.appointment?.patientId === userId ||
+        (exam.appointment?.dependentId &&
+          exam.appointment.dependent?.responsibles?.some((r) => r.id === userId)));
+
+    if (!isOwnerDoctor && !isOwnerPatient) {
+      throw new ForbiddenException(
+        'Only the doctor who created the exam or the patient who owns it can delete it',
+      );
     }
 
     if (exam.resultFile) {
