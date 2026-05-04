@@ -3,6 +3,7 @@ import * as bcrypt from 'bcrypt';
 import { In } from 'typeorm';
 import AppDataSource from '../data-source';
 import { seedClinic } from './seed-clinic';
+import { seedExamCatalog } from './seed-exam-catalog';
 import { Doctor } from '../../entities/doctor.entity';
 import { Patient } from '../../entities/patient.entity';
 import { Dependent } from '../../entities/dependent.entity';
@@ -368,6 +369,7 @@ export async function seedDatabase() {
   );
 
   await seedClinic();
+  await seedExamCatalog();
 
   if (shouldDestroyConnection && AppDataSource.isInitialized) {
     await AppDataSource.destroy();

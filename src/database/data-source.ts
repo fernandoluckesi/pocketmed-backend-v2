@@ -15,6 +15,10 @@ import { Clinic } from '../entities/clinic.entity';
 import { ClinicMembership } from '../entities/clinic-membership.entity';
 import { ClinicAdminProfile } from '../entities/clinic-admin-profile.entity';
 import { SecretaryProfile } from '../entities/secretary-profile.entity';
+import { ExamCategory } from '../entities/exam-category.entity';
+import { ExamCatalog } from '../entities/exam-catalog.entity';
+import { ExamSchedule } from '../entities/exam-schedule.entity';
+import { ExamScheduleItem } from '../entities/exam-schedule-item.entity';
 
 const AppDataSource = new DataSource({
   type: 'mysql',
@@ -38,6 +42,10 @@ const AppDataSource = new DataSource({
     ClinicMembership,
     ClinicAdminProfile,
     SecretaryProfile,
+    ExamCategory,
+    ExamCatalog,
+    ExamSchedule,
+    ExamScheduleItem,
   ],
   migrations: [__dirname + '/migrations/*{.ts,.js}'],
   synchronize: false,
