@@ -56,6 +56,10 @@ import { ExamSchedulingModule } from './exam-scheduling/exam-scheduling.module';
         username: configService.get<string>('DB_USERNAME'),
         password: configService.get<string>('DB_PASSWORD'),
         database: configService.get<string>('DB_DATABASE'),
+        // Retry connection on startup (Railway DB may not be immediately available)
+        retryAttempts: 10,
+        retryDelay: 3000,
+        connectTimeout: 20000,
         entities: [
           Patient,
           Doctor,

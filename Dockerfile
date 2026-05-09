@@ -11,6 +11,9 @@ RUN npm run build
 # ── Production image ──────────────────────────────────────────────────────────
 FROM node:18-alpine
 
+# Install netcat for DB readiness check in start.sh
+RUN apk add --no-cache netcat-openbsd
+
 WORKDIR /app
 
 COPY package*.json ./
