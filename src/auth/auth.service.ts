@@ -17,8 +17,19 @@ import { RegisterPatientShadowDto } from './dto/register-patient-shadow.dto';
 import { LoginDto } from './dto/login.dto';
 import { UploadService } from '../upload/upload.service';
 import { EmailService } from '../email/email.service';
+import { ClinicMembership } from '../entities/clinic-membership.entity';
+import { ClinicAdminProfile } from '../entities/clinic-admin-profile.entity';
+import { SecretaryProfile } from '../entities/secretary-profile.entity';
+import { ProfessionalRole } from './professional-role.enum';
 
 type AuthUser = Patient | Doctor;
+
+type DoctorAuthContext = {
+  role: ProfessionalRole;
+  activeClinicId: string | null;
+};
+
+type LoginUser = AuthUser | ClinicAdminProfile | SecretaryProfile;
 
 @Injectable()
 export class AuthService {
@@ -27,6 +38,12 @@ export class AuthService {
     private patientRepository: Repository<Patient>,
     @InjectRepository(Doctor)
     private doctorRepository: Repository<Doctor>,
+    @InjectRepository(ClinicMembership)
+    private clinicMembershipRepository: Repository<ClinicMembership>,
+    @InjectRepository(ClinicAdminProfile)
+    private clinicAdminProfileRepository: Repository<ClinicAdminProfile>,
+    @InjectRepository(SecretaryProfile)
+    private secretaryProfileRepository: Repository<SecretaryProfile>,
     private jwtService: JwtService,
     private uploadService: UploadService,
     private emailService: EmailService,
@@ -77,7 +94,7 @@ export class AuthService {
     const savedPatient = await this.patientRepository.save(patient);
     console.log('Patient saved with profileImage:', savedPatient.profileImage);
 
-    const token = this.generateToken(savedPatient);
+    const token = await this.generateToken(savedPatient);
 
     return {
       user: this.sanitizeUser(savedPatient),
@@ -85,13 +102,52 @@ export class AuthService {
     };
   }
 
-  async registerPatientShadow(dto: RegisterPatientShadowDto, file?: Express.Multer.File) {
+  async registerPatientShadow(
+    dto: RegisterPatientShadowDto,
+    file?: Express.Multer.File,
+    requester?: {
+      userId: string;
+      type: string;
+      role?: string | null;
+      activeClinicId?: string | null;
+    },
+  ) {
     const doctor = await this.doctorRepository.findOne({
       where: { id: dto.doctorCreatorId },
     });
 
     if (!doctor) {
       throw new NotFoundException('Doctor not found');
+    }
+
+    if (!requester || requester.type !== 'doctor') {
+      throw new UnauthorizedException('Only professional accounts can create shadow patients');
+    }
+
+    if (requester.role === ProfessionalRole.DOCTOR && requester.userId !== dto.doctorCreatorId) {
+      throw new UnauthorizedException('Doctors can only create shadow patients for themselves');
+    }
+
+    if (
+      requester.role === ProfessionalRole.ADMIN ||
+      requester.role === ProfessionalRole.SECRETARY
+    ) {
+      if (!requester.activeClinicId) {
+        throw new UnauthorizedException('Active clinic context is required for this operation');
+      }
+
+      const clinicDoctorMembership = await this.clinicMembershipRepository.findOne({
+        where: {
+          clinicId: requester.activeClinicId,
+          professionalId: dto.doctorCreatorId,
+          role: ProfessionalRole.DOCTOR,
+          isActive: true,
+        },
+      });
+
+      if (!clinicDoctorMembership) {
+        throw new UnauthorizedException('Selected doctor is not an active member of your clinic');
+      }
     }
 
     const existingUser = await this.findUserByEmail(dto.email);
@@ -163,20 +219,60 @@ export class AuthService {
 
     const savedDoctor = await this.doctorRepository.save(doctor);
 
-    const token = this.generateToken(savedDoctor);
+    const token = await this.generateToken(savedDoctor);
+
+    const doctorContext = await this.getDoctorAuthContext(savedDoctor.id);
 
     return {
-      user: this.sanitizeUser(savedDoctor),
+      user: this.sanitizeUser(savedDoctor, doctorContext),
       token,
     };
   }
 
   async login(dto: LoginDto) {
-    const user = await this.findUserByEmail(dto.email);
+    const loginUser = await this.findLoginUserByEmail(dto.email);
 
-    if (!user) {
+    if (!loginUser) {
       throw new UnauthorizedException('Invalid credentials');
     }
+
+    if (this.isRoleProfile(loginUser)) {
+      if (!loginUser.password) {
+        throw new UnauthorizedException('Invalid credentials');
+      }
+
+      const isPasswordValid = await bcrypt.compare(dto.password, loginUser.password);
+
+      if (!isPasswordValid) {
+        throw new UnauthorizedException('Invalid credentials');
+      }
+
+      if (!loginUser.professionalId) {
+        throw new UnauthorizedException('Role profile is not linked to a professional account');
+      }
+
+      const professional = await this.doctorRepository.findOne({
+        where: { id: loginUser.professionalId },
+      });
+
+      if (!professional) {
+        throw new UnauthorizedException('Invalid credentials');
+      }
+
+      if (professional.isShadow) {
+        throw new UnauthorizedException('Shadow account needs to be activated first');
+      }
+
+      const token = await this.generateToken(professional);
+      const doctorContext = await this.getDoctorAuthContext(professional.id);
+
+      return {
+        user: this.sanitizeUser(professional, doctorContext),
+        token,
+      };
+    }
+
+    const user = loginUser;
 
     if (user.isShadow) {
       throw new UnauthorizedException('Shadow account needs to be activated first');
@@ -192,10 +288,13 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    const token = this.generateToken(user);
+    const token = await this.generateToken(user);
+
+    const doctorContext =
+      user.type === 'doctor' ? await this.getDoctorAuthContext(user.id) : undefined;
 
     return {
-      user: this.sanitizeUser(user),
+      user: this.sanitizeUser(user, doctorContext),
       token,
     };
   }
@@ -253,11 +352,14 @@ export class AuthService {
 
     await this.saveUser(user);
 
-    const token = this.generateToken(user);
+    const token = await this.generateToken(user);
+
+    const doctorContext =
+      user.type === 'doctor' ? await this.getDoctorAuthContext(user.id) : undefined;
 
     return {
       message: 'Account activated successfully',
-      user: this.sanitizeUser(user),
+      user: this.sanitizeUser(user, doctorContext),
       token,
     };
   }
@@ -335,9 +437,61 @@ export class AuthService {
     };
   }
 
-  private generateToken(user: AuthUser) {
-    const payload = { email: user.email, sub: user.id, type: user.type };
+  private async generateToken(user: AuthUser) {
+    const payload: Record<string, string | null> = {
+      email: user.email,
+      sub: user.id,
+      type: user.type,
+    };
+
+    if (user.type === 'doctor') {
+      const doctorContext = await this.getDoctorAuthContext(user.id);
+      payload.role = doctorContext.role;
+      payload.activeClinicId = doctorContext.activeClinicId;
+    }
+
     return this.jwtService.sign(payload);
+  }
+
+  private async getDoctorAuthContext(doctorId: string): Promise<DoctorAuthContext> {
+    const membership = await this.clinicMembershipRepository.findOne({
+      where: { professionalId: doctorId, isActive: true },
+      order: { createdAt: 'ASC' },
+    });
+
+    return {
+      role: membership?.role || ProfessionalRole.DOCTOR,
+      activeClinicId: membership?.clinicId || null,
+    };
+  }
+
+  private isRoleProfile(user: LoginUser): user is ClinicAdminProfile | SecretaryProfile {
+    return !('type' in user);
+  }
+
+  private async findLoginUserByEmail(email: string): Promise<LoginUser | null> {
+    const normalizedEmail = email.trim().toLowerCase();
+
+    const patient = await this.patientRepository.findOne({ where: { email: normalizedEmail } });
+    if (patient) {
+      return patient;
+    }
+
+    const clinicAdmin = await this.clinicAdminProfileRepository.findOne({
+      where: { email: normalizedEmail },
+    });
+    if (clinicAdmin) {
+      return clinicAdmin;
+    }
+
+    const secretary = await this.secretaryProfileRepository.findOne({
+      where: { email: normalizedEmail },
+    });
+    if (secretary) {
+      return secretary;
+    }
+
+    return this.doctorRepository.findOne({ where: { email: normalizedEmail } });
   }
 
   private async findUserByEmail(email: string): Promise<AuthUser | null> {
@@ -366,9 +520,27 @@ export class AuthService {
     return this.doctorRepository.findOne({ where: { id: userId } });
   }
 
+  private async syncProfessionalDataToRoleProfiles(doctor: Doctor): Promise<void> {
+    const updatedFields = {
+      name: doctor.name,
+      email: doctor.email,
+      password: doctor.password || null,
+      phone: doctor.phone,
+      profileImage: doctor.profileImage || null,
+      gender: doctor.gender || null,
+      birthDate: doctor.birthDate || null,
+      cpf: doctor.cpf || null,
+    };
+
+    await this.clinicAdminProfileRepository.update({ professionalId: doctor.id }, updatedFields);
+    await this.secretaryProfileRepository.update({ professionalId: doctor.id }, updatedFields);
+  }
+
   private async saveUser(user: AuthUser): Promise<AuthUser> {
     if (user.type === 'doctor') {
-      return this.doctorRepository.save(user as Doctor);
+      const savedDoctor = await this.doctorRepository.save(user as Doctor);
+      await this.syncProfessionalDataToRoleProfiles(savedDoctor);
+      return savedDoctor;
     }
 
     return this.patientRepository.save(user as Patient);
@@ -378,8 +550,14 @@ export class AuthService {
     return Math.floor(100000 + Math.random() * 900000).toString();
   }
 
-  private sanitizeUser(user: any) {
+  private sanitizeUser(user: any, doctorContext?: DoctorAuthContext) {
     const { password, verificationCode, passwordResetCode, ...result } = user;
+
+    if (user?.type === 'doctor') {
+      result.role = doctorContext?.role || ProfessionalRole.DOCTOR;
+      result.activeClinicId = doctorContext?.activeClinicId || null;
+    }
+
     return result;
   }
 }

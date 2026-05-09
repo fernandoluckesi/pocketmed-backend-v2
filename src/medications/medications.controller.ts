@@ -16,13 +16,13 @@ export class MedicationsController {
   constructor(private medicationsService: MedicationsService) {}
 
   @Post()
-  @Roles('doctor')
-  @ApiOperation({ summary: 'Create medication (doctors only)' })
+  @Roles('doctor', 'patient')
+  @ApiOperation({ summary: 'Create medication (doctor or patient owner)' })
   @ApiResponse({ status: 201, description: 'Medication created successfully' })
   @ApiResponse({ status: 403, description: 'Forbidden - No permission' })
   @ApiResponse({ status: 404, description: 'Patient or Dependent not found' })
   async create(@CurrentUser() user: any, @Body() dto: CreateMedicationDto) {
-    return this.medicationsService.create(user.userId, dto);
+    return this.medicationsService.create(user.userId, user.type, dto);
   }
 
   @Get()
@@ -42,8 +42,8 @@ export class MedicationsController {
   }
 
   @Put(':id')
-  @Roles('doctor')
-  @ApiOperation({ summary: 'Update medication (doctor who created only)' })
+  @Roles('doctor', 'patient')
+  @ApiOperation({ summary: 'Update medication (doctor creator or patient owner)' })
   @ApiResponse({ status: 200, description: 'Medication updated successfully' })
   @ApiResponse({ status: 403, description: 'Forbidden' })
   @ApiResponse({ status: 404, description: 'Medication not found' })
@@ -56,8 +56,8 @@ export class MedicationsController {
   }
 
   @Delete(':id')
-  @Roles('doctor')
-  @ApiOperation({ summary: 'Delete medication (doctor who created only)' })
+  @Roles('doctor', 'patient')
+  @ApiOperation({ summary: 'Delete medication (doctor creator or patient owner)' })
   @ApiResponse({ status: 200, description: 'Medication deleted successfully' })
   @ApiResponse({ status: 403, description: 'Forbidden' })
   @ApiResponse({ status: 404, description: 'Medication not found' })

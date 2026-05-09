@@ -1,10 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import {
-  IsString,
-  IsEnum,
-  IsDateString,
-  IsOptional,
-} from 'class-validator';
+import { IsString, IsEnum, IsDateString, IsOptional, IsUUID } from 'class-validator';
 import { ExamType, ExamStatus } from '../../entities/exam.entity';
 
 export class UpdateExamDto {
@@ -18,7 +13,10 @@ export class UpdateExamDto {
   @IsOptional()
   type?: ExamType;
 
-  @ApiProperty({ example: 'Exame de sangue para verificar hemácias, leucócitos e plaquetas', required: false })
+  @ApiProperty({
+    example: 'Exame de sangue para verificar hemácias, leucócitos e plaquetas',
+    required: false,
+  })
   @IsString()
   @IsOptional()
   description?: string;
@@ -47,4 +45,9 @@ export class UpdateExamDto {
   @IsString()
   @IsOptional()
   laboratory?: string;
+
+  @ApiProperty({ example: 'b555dc1b-0cdb-4a4f-810b-65d33a7e50aa', required: false })
+  @IsUUID()
+  @IsOptional()
+  appointmentId?: string;
 }

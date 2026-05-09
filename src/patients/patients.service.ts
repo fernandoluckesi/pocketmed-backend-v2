@@ -1,38 +1,187 @@
 import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Like } from 'typeorm';
+import { Repository, Like, In } from 'typeorm';
 import { Patient } from '../entities/patient.entity';
 import { DoctorPermission } from '../entities/doctor-permission.entity';
+import { ClinicMembership } from '../entities/clinic-membership.entity';
+import { ProfessionalRole } from '../auth/professional-role.enum';
 
 @Injectable()
 export class PatientsService {
+  private readonly patientSelectFields: (keyof Patient)[] = [
+    'id',
+    'name',
+    'email',
+    'gender',
+    'phone',
+    'birthDate',
+    'profileImage',
+    'type',
+    'isShadow',
+    'doctorCreatorId',
+    'createdAt',
+    'updatedAt',
+  ];
+
   constructor(
     @InjectRepository(Patient)
     private patientRepository: Repository<Patient>,
     @InjectRepository(DoctorPermission)
     private permissionRepository: Repository<DoctorPermission>,
+    @InjectRepository(ClinicMembership)
+    private clinicMembershipRepository: Repository<ClinicMembership>,
   ) {}
 
-  async findAll(userType: string, userId?: string) {
+  private async getAccessiblePatientIdsForDoctor(doctorId: string): Promise<string[]> {
+    const createdByDoctor = await this.patientRepository.find({
+      where: { doctorCreatorId: doctorId },
+      select: ['id'],
+    });
+
+    const permissions = await this.permissionRepository
+      .createQueryBuilder('permission')
+      .select('permission.patientId', 'patientId')
+      .where('permission.doctorId = :doctorId', { doctorId })
+      .andWhere('permission.isActive = :isActive', { isActive: true })
+      .andWhere('permission.patientId IS NOT NULL')
+      .getRawMany<{ patientId: string }>();
+
+    const ids = new Set<string>();
+    for (const patient of createdByDoctor) {
+      ids.add(patient.id);
+    }
+    for (const permission of permissions) {
+      if (permission.patientId) {
+        ids.add(permission.patientId);
+      }
+    }
+
+    return Array.from(ids);
+  }
+
+  private async getClinicDoctorIds(clinicId: string): Promise<string[]> {
+    const memberships = await this.clinicMembershipRepository.find({
+      where: {
+        clinicId,
+        isActive: true,
+        role: ProfessionalRole.DOCTOR,
+      },
+      select: ['professionalId'],
+    });
+
+    return memberships.map((membership) => membership.professionalId);
+  }
+
+  private async getClinicPatientIds(clinicId: string): Promise<string[]> {
+    const doctorIds = await this.getClinicDoctorIds(clinicId);
+
+    if (doctorIds.length === 0) {
+      return [];
+    }
+
+    const createdPatients = await this.patientRepository.find({
+      where: { doctorCreatorId: In(doctorIds) },
+      select: ['id'],
+    });
+
+    const permissionRows = await this.permissionRepository
+      .createQueryBuilder('permission')
+      .select('permission.patientId', 'patientId')
+      .where('permission.doctorId IN (:...doctorIds)', { doctorIds })
+      .andWhere('permission.isActive = :isActive', { isActive: true })
+      .andWhere('permission.patientId IS NOT NULL')
+      .getRawMany<{ patientId: string }>();
+
+    const ids = new Set<string>();
+    for (const patient of createdPatients) {
+      ids.add(patient.id);
+    }
+    for (const row of permissionRows) {
+      if (row.patientId) {
+        ids.add(row.patientId);
+      }
+    }
+
+    return Array.from(ids);
+  }
+
+  async getSummary(
+    userType: string,
+    userId?: string,
+    userRole?: string | null,
+    activeClinicId?: string | null,
+  ) {
     if (userType !== 'doctor') {
+      throw new ForbiddenException('Only professionals can view patients summary');
+    }
+
+    if (!userId) {
+      return { accessiblePatientsCount: 0 };
+    }
+
+    if (userRole === ProfessionalRole.ADMIN || userRole === ProfessionalRole.SECRETARY) {
+      if (!activeClinicId) {
+        return { accessiblePatientsCount: 0 };
+      }
+
+      const patientIds = await this.getClinicPatientIds(activeClinicId);
+      return {
+        accessiblePatientsCount: patientIds.length,
+      };
+    }
+
+    const patientIds = await this.getAccessiblePatientIdsForDoctor(userId);
+
+    return {
+      accessiblePatientsCount: patientIds.length,
+    };
+  }
+
+  async findMyPatients(
+    userType: string,
+    userId?: string,
+    userRole?: string | null,
+    activeClinicId?: string | null,
+  ) {
+    if (userType !== 'doctor' || userRole !== ProfessionalRole.DOCTOR) {
+      throw new ForbiddenException('Only doctors can view patients');
+    }
+
+    if (!userId) {
+      return [];
+    }
+
+    const patientIds = await this.getAccessiblePatientIdsForDoctor(userId);
+
+    if (patientIds.length === 0) {
+      return [];
+    }
+
+    const patients = await this.patientRepository.find({
+      where: { id: In(patientIds) },
+      select: this.patientSelectFields,
+    });
+
+    return patients.map((patient) => ({
+      ...patient,
+      createdByDoctorId: patient.doctorCreatorId,
+      hasPermission: true,
+      hasAccess: true,
+    }));
+  }
+
+  async findAll(
+    userType: string,
+    userId?: string,
+    userRole?: string | null,
+    activeClinicId?: string | null,
+  ) {
+    if (userType !== 'doctor' || userRole !== ProfessionalRole.DOCTOR) {
       throw new ForbiddenException('Only doctors can view all patients');
     }
 
     const patients = await this.patientRepository.find({
-      select: [
-        'id',
-        'name',
-        'email',
-        'gender',
-        'phone',
-        'birthDate',
-        'profileImage',
-        'type',
-        'isShadow',
-        'doctorCreatorId',
-        'createdAt',
-        'updatedAt',
-      ],
+      select: this.patientSelectFields,
     });
 
     if (!userId || patients.length === 0) {
@@ -56,7 +205,8 @@ export class PatientsService {
     const patientIdsWithPermission = new Set(permissions.map((p) => p.patientId));
 
     return patients.map((patient) => {
-      const hasPermission = patientIdsWithPermission.has(patient.id);
+      const isCreator = patient.doctorCreatorId === userId;
+      const hasPermission = isCreator || patientIdsWithPermission.has(patient.id);
       return {
         ...patient,
         createdByDoctorId: patient.doctorCreatorId,
@@ -66,7 +216,13 @@ export class PatientsService {
     });
   }
 
-  async findOne(id: string, userId: string, userType: string) {
+  async findOne(
+    id: string,
+    userId: string,
+    userType: string,
+    userRole?: string | null,
+    activeClinicId?: string | null,
+  ) {
     const patient = await this.patientRepository.findOne({
       where: { id },
       select: [
@@ -94,6 +250,10 @@ export class PatientsService {
     }
 
     if (userType === 'doctor' && userId) {
+      if (userRole !== ProfessionalRole.DOCTOR) {
+        throw new ForbiddenException('Only doctors can access patient profile details');
+      }
+
       const isCreator = patient.doctorCreatorId === userId;
       let hasPermission = isCreator;
 
@@ -102,6 +262,10 @@ export class PatientsService {
           where: { doctorId: userId, patientId: id, isActive: true },
         });
         hasPermission = !!permission;
+      }
+
+      if (!hasPermission) {
+        throw new ForbiddenException('You do not have permission to view this patient');
       }
 
       return {
@@ -115,31 +279,53 @@ export class PatientsService {
     return patient;
   }
 
-  async search(query: string, userType: string, userId?: string) {
+  async search(
+    query: string,
+    userType: string,
+    userId?: string,
+    userRole?: string | null,
+    activeClinicId?: string | null,
+  ) {
     if (userType !== 'doctor') {
-      throw new ForbiddenException('Only doctors can search patients');
+      throw new ForbiddenException('Only professionals can search patients');
     }
 
     if (query.length < 3) {
       throw new ForbiddenException('Search query must be at least 3 characters');
     }
 
+    if (userRole === ProfessionalRole.SECRETARY || userRole === ProfessionalRole.ADMIN) {
+      if (!activeClinicId) {
+        throw new ForbiddenException('Active clinic context is required to search patients');
+      }
+
+      const clinicPatientIds = await this.getClinicPatientIds(activeClinicId);
+      if (clinicPatientIds.length === 0) {
+        return [];
+      }
+
+      const patients = await this.patientRepository.find({
+        where: [
+          { id: In(clinicPatientIds), name: Like(`%${query}%`) },
+          { id: In(clinicPatientIds), email: Like(`%${query}%`) },
+        ],
+        select: ['id', 'name', 'email'],
+      });
+
+      return patients.map((patient) => ({
+        id: patient.id,
+        name: patient.name,
+        email: patient.email,
+      }));
+    }
+
+    if (userRole !== ProfessionalRole.DOCTOR) {
+      throw new ForbiddenException('Only doctors can search patients');
+    }
+
     const patients = await this.patientRepository.find({
       where: [{ name: Like(`%${query}%`) }, { email: Like(`%${query}%`) }],
-      select: [
-        'id',
-        'name',
-        'email',
-        'gender',
-        'phone',
-        'birthDate',
-        'profileImage',
-        'type',
-        'isShadow',
-        'doctorCreatorId',
-        'createdAt',
-        'updatedAt',
-      ],
+      select: this.patientSelectFields,
     });
 
     if (!userId || patients.length === 0) {
@@ -163,7 +349,8 @@ export class PatientsService {
     const patientIdsWithPermission = new Set(permissions.map((p) => p.patientId));
 
     return patients.map((patient) => {
-      const hasPermission = patientIdsWithPermission.has(patient.id);
+      const isCreator = patient.doctorCreatorId === userId;
+      const hasPermission = isCreator || patientIdsWithPermission.has(patient.id);
       return {
         ...patient,
         createdByDoctorId: patient.doctorCreatorId,

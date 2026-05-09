@@ -32,6 +32,7 @@ export class UploadService implements OnModuleInit {
       useSSL: useSSL,
       accessKey: accessKey,
       secretKey: secretKey,
+      pathStyle: true, // Required for R2 and other S3-compatible services
     });
   }
 
@@ -75,11 +76,14 @@ export class UploadService implements OnModuleInit {
       await this.minioClient.putObject(this.bucketName, fileName, file.buffer, file.size, metaData);
 
       const endpoint = this.configService.get<string>('MINIO_ENDPOINT');
-      const port = this.configService.get<string>('MINIO_PORT');
+      const port = parseInt(this.configService.get<string>('MINIO_PORT'));
       const useSSL = this.configService.get<string>('MINIO_USE_SSL') === 'true';
       const protocol = useSSL ? 'https' : 'http';
 
-      const fileUrl = `${protocol}://${endpoint}:${port}/${this.bucketName}/${fileName}`;
+      // For R2/S3-compatible services on standard ports (443/80), omit the port from the URL
+      const isStandardPort = (useSSL && port === 443) || (!useSSL && port === 80);
+      const hostWithPort = isStandardPort ? endpoint : `${endpoint}:${port}`;
+      const fileUrl = `${protocol}://${hostWithPort}/${this.bucketName}/${fileName}`;
       return fileUrl;
     } catch (error) {
       this.logger.error(`Error uploading file: ${error.message}`);

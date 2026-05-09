@@ -6,13 +6,14 @@ import { Appointment } from '../entities/appointment.entity';
 import { Doctor } from '../entities/doctor.entity';
 import { Patient } from '../entities/patient.entity';
 import { Dependent } from '../entities/dependent.entity';
+import { ClinicMembership } from '../entities/clinic-membership.entity';
 import { DoctorsModule } from '../doctors/doctors.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { PatientsModule } from 'src/patients/patients.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Appointment, Doctor, Patient, Dependent]),
+    TypeOrmModule.forFeature([Appointment, Doctor, Patient, Dependent, ClinicMembership]),
     DoctorsModule,
     NotificationsModule,
     PatientsModule,

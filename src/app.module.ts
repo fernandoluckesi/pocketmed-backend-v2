@@ -28,7 +28,18 @@ import { AvailabilityRule } from './entities/availability-rule.entity';
 import { AvailabilityException } from './entities/availability-exception.entity';
 import { DeviceToken } from './entities/device-token.entity';
 import { Notification } from './entities/notification.entity';
+import { Clinic } from './entities/clinic.entity';
+import { ClinicMembership } from './entities/clinic-membership.entity';
+import { ClinicAdminProfile } from './entities/clinic-admin-profile.entity';
+import { SecretaryProfile } from './entities/secretary-profile.entity';
+import { ExamCategory } from './entities/exam-category.entity';
+import { ExamCatalog } from './entities/exam-catalog.entity';
+import { ExamSchedule } from './entities/exam-schedule.entity';
+import { ExamScheduleItem } from './entities/exam-schedule-item.entity';
 import { NotificationsModule } from './notifications/notifications.module';
+import { ClinicAdminModule } from './clinic-admin/clinic-admin.module';
+import { ExamCatalogModule } from './exam-catalog/exam-catalog.module';
+import { ExamSchedulingModule } from './exam-scheduling/exam-scheduling.module';
 
 @Module({
   imports: [
@@ -58,6 +69,14 @@ import { NotificationsModule } from './notifications/notifications.module';
           AvailabilityException,
           DeviceToken,
           Notification,
+          Clinic,
+          ClinicMembership,
+          ClinicAdminProfile,
+          SecretaryProfile,
+          ExamCategory,
+          ExamCatalog,
+          ExamSchedule,
+          ExamScheduleItem,
         ],
         migrations: [__dirname + '/database/migrations/*{.ts,.js}'],
         synchronize: false,
@@ -76,6 +95,9 @@ import { NotificationsModule } from './notifications/notifications.module';
     UploadModule,
     EmailModule,
     NotificationsModule,
+    ClinicAdminModule,
+    ExamCatalogModule,
+    ExamSchedulingModule,
   ],
   controllers: [AppController],
   providers: [

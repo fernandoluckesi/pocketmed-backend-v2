@@ -92,8 +92,8 @@ export class NotificationsService {
             this.logger.warn(`Push error: ${ticket.message}`);
 
             if (
-              ticket.details?.error === 'DeviceNotRegistered' ||
-              ticket.details?.error === 'InvalidCredentials'
+              (ticket as any).details?.error === 'DeviceNotRegistered' ||
+              (ticket as any).details?.error === 'InvalidCredentials'
             ) {
               const tokenStr = (ticket as any).to as string | undefined;
               if (tokenStr) {
@@ -110,8 +110,6 @@ export class NotificationsService {
       }
     }
   }
-
-  // ─── Persistent in-app notifications ────────────────────────────────────────
 
   async createNotification(
     userId: string,
@@ -134,7 +132,6 @@ export class NotificationsService {
     });
     const saved = await this.notificationRepository.save(notification);
 
-    // Fire push (best-effort, no await needed to block the caller)
     this.sendPushToUser(userId, title, body, { type, relatedEntityId, ...data }).catch((err) =>
       this.logger.error(`Push failed: ${err.message}`),
     );

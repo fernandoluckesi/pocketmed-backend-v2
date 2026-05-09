@@ -10,11 +10,13 @@ import { Appointment, AppointmentStatus } from '../entities/appointment.entity';
 import { Doctor } from '../entities/doctor.entity';
 import { Patient } from '../entities/patient.entity';
 import { Dependent } from '../entities/dependent.entity';
+import { ClinicMembership } from '../entities/clinic-membership.entity';
 import { DoctorsService } from '../doctors/doctors.service';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import { UpdateAppointmentDto } from './dto/update-appointment.dto';
 import { PatientsService } from 'src/patients/patients.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { ProfessionalRole } from '../auth/professional-role.enum';
 
 @Injectable()
 export class AppointmentsService {
@@ -27,13 +29,55 @@ export class AppointmentsService {
     private patientRepository: Repository<Patient>,
     @InjectRepository(Dependent)
     private dependentRepository: Repository<Dependent>,
+    @InjectRepository(ClinicMembership)
+    private clinicMembershipRepository: Repository<ClinicMembership>,
     private doctorsService: DoctorsService,
     private notificationsService: NotificationsService,
     private patientsService: PatientsService,
   ) {}
 
-  async create(userId: string, userType: string, dto: CreateAppointmentDto) {
+  private async getClinicDoctorIds(clinicId: string): Promise<string[]> {
+    const memberships = await this.clinicMembershipRepository.find({
+      where: {
+        clinicId,
+        isActive: true,
+        role: ProfessionalRole.DOCTOR,
+      },
+      select: ['professionalId'],
+    });
+
+    return memberships.map((membership) => membership.professionalId);
+  }
+
+  private sanitizeForSecretary(appointment: Appointment) {
+    return {
+      id: appointment.id,
+      dateTime: appointment.dateTime,
+      status: appointment.status,
+      doctorId: appointment.doctorId,
+      doctorName: appointment.doctorName,
+      doctorSpecialty: appointment.doctorSpecialty,
+      patientId: appointment.patientId,
+      dependentId: appointment.dependentId,
+      patientName: appointment.patient?.name || appointment.dependent?.name || 'Paciente',
+    };
+  }
+
+  async create(
+    userId: string,
+    userType: string,
+    userRole: string | null,
+    activeClinicId: string | null,
+    dto: CreateAppointmentDto,
+  ) {
     if (userType === 'doctor') {
+      if (userRole === ProfessionalRole.SECRETARY || userRole === ProfessionalRole.ADMIN) {
+        return this.createByClinicStaff(userRole, activeClinicId, dto);
+      }
+
+      if (userRole && userRole !== ProfessionalRole.DOCTOR) {
+        throw new ForbiddenException('Only doctors can create appointments');
+      }
       return this.createByDoctor(userId, dto);
     }
 
@@ -42,6 +86,53 @@ export class AppointmentsService {
     }
 
     throw new ForbiddenException('Invalid user type');
+  }
+
+  private async createByClinicStaff(
+    userRole: string,
+    activeClinicId: string | null,
+    dto: CreateAppointmentDto,
+  ) {
+    if (userRole !== ProfessionalRole.SECRETARY && userRole !== ProfessionalRole.ADMIN) {
+      throw new ForbiddenException('Only clinic admin or secretary can use this flow');
+    }
+
+    if (!activeClinicId) {
+      throw new ForbiddenException('Active clinic context is required for this operation');
+    }
+
+    if (!dto.doctorId) {
+      throw new BadRequestException('doctorId is required for clinic staff scheduling');
+    }
+
+    const hasClinicalData =
+      Boolean(dto.isCompleted) ||
+      Boolean(dto.doctorFeedback?.trim()) ||
+      Boolean(dto.doctorInstructions?.trim());
+
+    if (hasClinicalData) {
+      throw new ForbiddenException('Clinic staff cannot include clinical notes in scheduling');
+    }
+
+    const membership = await this.clinicMembershipRepository.findOne({
+      where: {
+        clinicId: activeClinicId,
+        professionalId: dto.doctorId,
+        role: ProfessionalRole.DOCTOR,
+        isActive: true,
+      },
+    });
+
+    if (!membership) {
+      throw new ForbiddenException('Selected doctor is not an active member of your clinic');
+    }
+
+    return this.createByDoctor(dto.doctorId, {
+      ...dto,
+      isCompleted: false,
+      doctorFeedback: undefined,
+      doctorInstructions: undefined,
+    });
   }
 
   private async createByDoctor(doctorId: string, dto: CreateAppointmentDto) {
@@ -143,7 +234,7 @@ export class AppointmentsService {
       }
     }
 
-    let doctorId: string;
+    let doctorId: string | null;
     let doctorCrm: string;
     let doctorName: string;
     let doctorSpecialty: string;
@@ -178,6 +269,7 @@ export class AppointmentsService {
         doctorName = doctor.name;
         doctorSpecialty = doctor.specialty;
       } else {
+        // Doctor not in the database — save external doctor data without doctorId
         doctorId = null;
         doctorCrm = dto.doctorCrm;
         doctorName = dto.doctorName;
@@ -191,9 +283,10 @@ export class AppointmentsService {
       doctorSpecialty,
       reason: dto.reason,
       dateTime: new Date(dto.dateTime),
-      isCompleted: false,
+      isCompleted: dto.isCompleted || false,
       doctorId,
       patientId: dto.dependentId ? null : patientId,
+      createdByPatientId: patientId,
       dependentId: dto.dependentId,
       status: AppointmentStatus.APPROVED,
     });
@@ -201,8 +294,46 @@ export class AppointmentsService {
     return await this.appointmentRepository.save(appointment);
   }
 
-  async findAll(userId: string, userType: string) {
+  async findAll(
+    userId: string,
+    userType: string,
+    userRole: string | null,
+    activeClinicId: string | null,
+  ) {
     if (userType === 'doctor') {
+      if (userRole === ProfessionalRole.SECRETARY) {
+        if (!activeClinicId) {
+          throw new ForbiddenException('Secretary must be associated with an active clinic');
+        }
+
+        const doctorIds = await this.getClinicDoctorIds(activeClinicId);
+        if (doctorIds.length === 0) return [];
+
+        const appointments = await this.appointmentRepository
+          .createQueryBuilder('appointment')
+          .leftJoinAndSelect('appointment.patient', 'patient')
+          .leftJoinAndSelect('appointment.dependent', 'dependent')
+          .where('appointment.doctorId IN (:...doctorIds)', { doctorIds })
+          .orderBy('appointment.dateTime', 'ASC')
+          .getMany();
+
+        return appointments.map((appointment) => this.sanitizeForSecretary(appointment));
+      }
+
+      if (userRole === ProfessionalRole.ADMIN) {
+        if (!activeClinicId) {
+          throw new ForbiddenException('Admin must be associated with an active clinic');
+        }
+
+        const doctorIds = await this.getClinicDoctorIds(activeClinicId);
+        if (doctorIds.length === 0) return [];
+
+        return await this.appointmentRepository.find({
+          where: doctorIds.map((doctorId) => ({ doctorId })),
+          relations: ['doctor', 'patient', 'dependent'],
+        });
+      }
+
       return await this.appointmentRepository.find({
         where: { doctorId: userId },
         relations: ['doctor', 'patient', 'dependent'],
@@ -234,13 +365,24 @@ export class AppointmentsService {
           .getMany();
       }
 
-      return [...patientAppointments, ...dependentAppointments];
+      const appointmentMap = new Map<string, Appointment>();
+      [...patientAppointments, ...dependentAppointments].forEach((appointment) => {
+        appointmentMap.set(appointment.id, appointment);
+      });
+
+      return Array.from(appointmentMap.values());
     }
 
     return [];
   }
 
-  async findOne(id: string, userId: string, userType: string) {
+  async findOne(
+    id: string,
+    userId: string,
+    userType: string,
+    userRole: string | null,
+    activeClinicId: string | null,
+  ) {
     const appointment = await this.appointmentRepository.findOne({
       where: { id },
       relations: ['doctor', 'patient', 'dependent', 'dependent.responsibles'],
@@ -250,16 +392,32 @@ export class AppointmentsService {
       throw new NotFoundException('Appointment not found');
     }
 
-    const canAccess = await this.canAccessAppointment(appointment, userId, userType);
+    const canAccess = await this.canAccessAppointment(
+      appointment,
+      userId,
+      userType,
+      userRole,
+      activeClinicId,
+    );
 
     if (!canAccess) {
       throw new ForbiddenException('You do not have permission to view this appointment');
     }
 
+    if (userType === 'doctor' && userRole === ProfessionalRole.SECRETARY) {
+      return this.sanitizeForSecretary(appointment);
+    }
+
     return appointment;
   }
 
-  async update(id: string, userId: string, userType: string, dto: UpdateAppointmentDto) {
+  async update(
+    id: string,
+    userId: string,
+    userType: string,
+    userRole: string | null,
+    dto: UpdateAppointmentDto,
+  ) {
     const appointment = await this.appointmentRepository.findOne({
       where: { id },
       relations: ['doctor', 'patient', 'dependent', 'dependent.responsibles'],
@@ -269,8 +427,20 @@ export class AppointmentsService {
       throw new NotFoundException('Appointment not found');
     }
 
-    if (userType !== 'doctor' || appointment.doctorId !== userId) {
-      throw new ForbiddenException('Only the doctor who created the appointment can update it');
+    const isOwnerDoctor =
+      userType === 'doctor' &&
+      userRole === ProfessionalRole.DOCTOR &&
+      appointment.doctorId === userId;
+
+    const isOwnerPatient =
+      userType === 'patient' &&
+      (appointment.createdByPatientId === userId ||
+        (!appointment.createdByPatientId && appointment.patientId === userId));
+
+    if (!isOwnerDoctor && !isOwnerPatient) {
+      throw new ForbiddenException(
+        'Only the doctor who created the appointment or the patient who owns it can update it',
+      );
     }
 
     const isDoctorRequestingCompletion = dto.isCompleted === true;
@@ -314,16 +484,14 @@ export class AppointmentsService {
       throw new ForbiddenException('Only patients can respond to appointments');
     }
 
-    if (appointment.patientId && appointment.patientId !== userId) {
-      throw new ForbiddenException('You can only respond to your own appointments');
-    }
-
     if (appointment.dependentId) {
       const isResponsible = appointment.dependent.responsibles.some((r) => r.id === userId);
 
       if (!isResponsible) {
         throw new ForbiddenException('You are not responsible for this dependent');
       }
+    } else if (appointment.patientId && appointment.patientId !== userId) {
+      throw new ForbiddenException('You can only respond to your own appointments');
     }
 
     const hasCompletionData = Boolean(
@@ -353,7 +521,7 @@ export class AppointmentsService {
     };
   }
 
-  async delete(id: string, userId: string, userType: string) {
+  async delete(id: string, userId: string, userType: string, userRole: string | null) {
     const appointment = await this.appointmentRepository.findOne({
       where: { id },
     });
@@ -362,8 +530,20 @@ export class AppointmentsService {
       throw new NotFoundException('Appointment not found');
     }
 
-    if (userType !== 'doctor' || appointment.doctorId !== userId) {
-      throw new ForbiddenException('Only the doctor who created the appointment can delete it');
+    const isOwnerDoctor =
+      userType === 'doctor' &&
+      userRole === ProfessionalRole.DOCTOR &&
+      appointment.doctorId === userId;
+
+    const isOwnerPatient =
+      userType === 'patient' &&
+      (appointment.createdByPatientId === userId ||
+        (!appointment.createdByPatientId && appointment.patientId === userId));
+
+    if (!isOwnerDoctor && !isOwnerPatient) {
+      throw new ForbiddenException(
+        'Only the doctor who created the appointment or the patient who owns it can delete it',
+      );
     }
 
     await this.appointmentRepository.remove(appointment);
@@ -377,8 +557,19 @@ export class AppointmentsService {
     appointment: Appointment,
     userId: string,
     userType: string,
+    userRole: string | null,
+    activeClinicId: string | null,
   ): Promise<boolean> {
     if (userType === 'doctor') {
+      if (userRole === ProfessionalRole.SECRETARY || userRole === ProfessionalRole.ADMIN) {
+        if (!activeClinicId) {
+          return false;
+        }
+
+        const doctorIds = await this.getClinicDoctorIds(activeClinicId);
+        return doctorIds.includes(appointment.doctorId);
+      }
+
       if (appointment.doctorId === userId) {
         return true;
       }
