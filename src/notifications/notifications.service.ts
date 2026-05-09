@@ -4,7 +4,16 @@ import { Repository } from 'typeorm';
 import { DeviceToken } from '../entities/device-token.entity';
 import { Notification } from '../entities/notification.entity';
 import { RegisterDeviceTokenDto } from './dto/register-device-token.dto';
-import Expo, { ExpoPushMessage } from 'expo-server-sdk';
+
+// expo-server-sdk is ESM-only — use dynamic import to avoid ERR_REQUIRE_ESM
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let _expoModule: any = null;
+async function getExpoModule() {
+  if (!_expoModule) {
+    _expoModule = await import('expo-server-sdk');
+  }
+  return _expoModule;
+}
 
 export interface PushPayload {
   type: string;
@@ -15,7 +24,8 @@ export interface PushPayload {
 @Injectable()
 export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
-  private readonly expo = new Expo();
+  // Lazy-initialized Expo client
+  private _expoClient: any = null;
 
   constructor(
     @InjectRepository(DeviceToken)
@@ -23,6 +33,21 @@ export class NotificationsService {
     @InjectRepository(Notification)
     private notificationRepository: Repository<Notification>,
   ) {}
+
+  private async getExpoClient() {
+    if (!this._expoClient) {
+      const mod = await getExpoModule();
+      const ExpoClass = mod.default ?? mod.Expo ?? mod;
+      this._expoClient = new ExpoClass();
+    }
+    return this._expoClient;
+  }
+
+  private async isExpoPushToken(token: string): Promise<boolean> {
+    const mod = await getExpoModule();
+    const ExpoClass = mod.default ?? mod.Expo ?? mod;
+    return ExpoClass.isExpoPushToken(token);
+  }
 
   async registerToken(
     userId: string,
@@ -67,23 +92,30 @@ export class NotificationsService {
 
     if (!tokens.length) return;
 
-    const messages: ExpoPushMessage[] = tokens
-      .filter((t) => Expo.isExpoPushToken(t.expoPushToken))
-      .map((t) => ({
-        to: t.expoPushToken,
-        sound: 'default' as const,
-        title,
-        body,
-        data,
-      }));
+    const expo = await this.getExpoClient();
 
-    if (!messages.length) return;
+    const validTokens: string[] = [];
+    for (const t of tokens) {
+      if (await this.isExpoPushToken(t.expoPushToken)) {
+        validTokens.push(t.expoPushToken);
+      }
+    }
 
-    const chunks = this.expo.chunkPushNotifications(messages);
+    if (!validTokens.length) return;
+
+    const messages = validTokens.map((to) => ({
+      to,
+      sound: 'default' as const,
+      title,
+      body,
+      data,
+    }));
+
+    const chunks = expo.chunkPushNotifications(messages);
 
     for (const chunk of chunks) {
       try {
-        const tickets = await this.expo.sendPushNotificationsAsync(chunk);
+        const tickets = await expo.sendPushNotificationsAsync(chunk);
 
         for (const ticket of tickets) {
           if (ticket.status === 'error') {
@@ -132,7 +164,7 @@ export class NotificationsService {
     });
     const saved = await this.notificationRepository.save(notification);
 
-    // Fire push (best-effort, no await needed to block the caller)
+    // Fire push (best-effort)
     this.sendPushToUser(userId, title, body, { type, relatedEntityId, ...data }).catch((err) =>
       this.logger.error(`Push failed: ${err.message}`),
     );

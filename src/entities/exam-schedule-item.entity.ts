@@ -21,12 +21,16 @@ export class ExamScheduleItem {
   @JoinColumn({ name: 'examScheduleId' })
   examSchedule: ExamSchedule;
 
-  @Column({ type: 'uuid' })
-  examCatalogId: string;
+  @Column({ type: 'uuid', nullable: true })
+  examCatalogId: string | null;
 
-  @ManyToOne(() => ExamCatalog)
+  @ManyToOne(() => ExamCatalog, { nullable: true })
   @JoinColumn({ name: 'examCatalogId' })
-  examCatalog: ExamCatalog;
+  examCatalog: ExamCatalog | null;
+
+  /** Name entered manually by the patient when the exam is not in the catalog */
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  customExamName: string | null;
 
   @CreateDateColumn()
   createdAt: Date;

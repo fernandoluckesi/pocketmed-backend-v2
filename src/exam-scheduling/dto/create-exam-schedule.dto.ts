@@ -1,19 +1,49 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsArray, IsUUID, ArrayMinSize, IsDateString } from 'class-validator';
+import {
+  IsArray,
+  IsDateString,
+  ArrayMinSize,
+  ValidateNested,
+  IsUUID,
+  IsString,
+  IsOptional,
+  MaxLength,
+} from 'class-validator';
+import { Type } from 'class-transformer';
+
+export class ExamItemDto {
+  @ApiProperty({
+    example: '123e4567-e89b-12d3-a456-426614174000',
+    description: 'Exam catalog ID (null for custom exams)',
+    required: false,
+    nullable: true,
+  })
+  @IsOptional()
+  @IsUUID()
+  examCatalogId?: string | null;
+
+  @ApiProperty({
+    example: 'Hemograma especial',
+    description: 'Custom exam name (used when examCatalogId is not provided)',
+    required: false,
+    nullable: true,
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  customExamName?: string | null;
+}
 
 export class CreateExamScheduleDto {
   @ApiProperty({
-    example: [
-      '123e4567-e89b-12d3-a456-426614174000',
-      '223e4567-e89b-12d3-a456-426614174001',
-    ],
-    description: 'List of exam catalog IDs to schedule (at least one required)',
-    type: [String],
+    description: 'List of exams to schedule (catalog or custom)',
+    type: [ExamItemDto],
   })
   @IsArray()
   @ArrayMinSize(1)
-  @IsUUID('all', { each: true })
-  examIds: string[];
+  @ValidateNested({ each: true })
+  @Type(() => ExamItemDto)
+  exams: ExamItemDto[];
 
   @ApiProperty({
     example: '2024-06-15T09:00:00.000Z',

@@ -15,7 +15,7 @@ export class ExamSchedulingService {
   ) {}
 
   async create(patientId: string, dto: CreateExamScheduleDto): Promise<ExamSchedule> {
-    if (!dto.examIds || dto.examIds.length === 0) {
+    if (!dto.exams || dto.exams.length === 0) {
       throw new BadRequestException(
         'A lista de exames não pode estar vazia. Selecione pelo menos um exame.',
       );
@@ -36,10 +36,11 @@ export class ExamSchedulingService {
 
     const savedSchedule = await this.examScheduleRepository.save(schedule);
 
-    const items = dto.examIds.map((examCatalogId) =>
+    const items = dto.exams.map((examItem) =>
       this.examScheduleItemRepository.create({
         examScheduleId: savedSchedule.id,
-        examCatalogId,
+        examCatalogId: examItem.examCatalogId ?? null,
+        customExamName: examItem.customExamName ?? null,
       }),
     );
 
