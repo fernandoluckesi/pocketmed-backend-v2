@@ -22,11 +22,11 @@ import { ExamScheduleItem } from '../entities/exam-schedule-item.entity';
 
 const AppDataSource = new DataSource({
   type: 'mysql',
-  host: process.env.DB_HOST || 'localhost',
-  port: Number(process.env.DB_PORT || 3306),
-  username: process.env.DB_USERNAME || process.env.MYSQL_USER || 'pocketmed_user',
-  password: process.env.DB_PASSWORD || process.env.MYSQL_PASSWORD || 'pocketmed_pass',
-  database: process.env.DB_DATABASE || process.env.MYSQL_DATABASE || 'pocketmed',
+  host: process.env.DB_HOST || process.env.MYSQL_HOST || process.env.MYSQLHOST || 'localhost',
+  port: Number(process.env.DB_PORT || process.env.MYSQL_PORT || process.env.MYSQLPORT || 3306),
+  username: process.env.DB_USERNAME || process.env.MYSQL_USER || process.env.MYSQLUSER || 'pocketmed_user',
+  password: process.env.DB_PASSWORD || process.env.MYSQL_PASSWORD || process.env.MYSQLPASSWORD || 'pocketmed_pass',
+  database: process.env.DB_DATABASE || process.env.MYSQL_DATABASE || process.env.MYSQLDATABASE || 'pocketmed',
   entities: [
     Patient,
     Doctor,
