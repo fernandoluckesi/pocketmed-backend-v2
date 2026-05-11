@@ -73,8 +73,9 @@ export class AuthService {
     let profileImageUrl = null;
     if (file) {
       console.log('Uploading file to MinIO...');
-      profileImageUrl = await this.uploadService.uploadFile(file, 'profiles');
-      console.log('File uploaded successfully. URL:', profileImageUrl);
+      const uploadedUrl = await this.uploadService.uploadFile(file, 'profiles');
+      profileImageUrl = uploadedUrl || null;
+      console.log('File uploaded. URL:', profileImageUrl);
     }
 
     const hashedPassword = await bcrypt.hash(dto.password, 10);

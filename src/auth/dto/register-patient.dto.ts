@@ -23,8 +23,8 @@ export class RegisterPatientDto {
   password: string;
 
   @ApiProperty({ example: '(11) 99999-1234' })
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
   phone: string;
 
   @ApiProperty({ example: '1950-09-25' })
