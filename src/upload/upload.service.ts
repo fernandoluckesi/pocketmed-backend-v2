@@ -87,6 +87,14 @@ export class UploadService implements OnModuleInit {
 
       await this.minioClient.putObject(this.bucketName, fileName, file.buffer, file.size, metaData);
 
+      // Use public URL if configured (e.g. Cloudflare R2 public dev URL or custom domain)
+      // Otherwise fall back to the S3-compatible endpoint URL
+      const publicUrl = this.configService.get<string>('MINIO_PUBLIC_URL');
+      if (publicUrl) {
+        const base = publicUrl.replace(/\/+$/, '');
+        return `${base}/${fileName}`;
+      }
+
       const endpoint = this.configService.get<string>('MINIO_ENDPOINT');
       const port = parseInt(this.configService.get<string>('MINIO_PORT'));
       const useSSL = this.configService.get<string>('MINIO_USE_SSL') === 'true';
