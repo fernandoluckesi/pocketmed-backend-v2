@@ -83,26 +83,32 @@ export class DoctorsService {
       throw new BadRequestException('Both crm and state are required');
     }
 
-    const formattedCrm = `${normalizedState}-${normalizedCrm}`;
+    // Support both formats: "STATE-CRM" (mobile format) and "CRM/STATE" (legacy format)
+    const formatDash = `${normalizedState}-${normalizedCrm}`;
+    const formatSlash = `${normalizedCrm}/${normalizedState}`;
 
-    console.log(`Searching for doctor with CRM: ${formattedCrm}`);
+    console.log(`Searching for doctor with CRM: ${formatDash} or ${formatSlash}`);
 
-    const doctor = await this.doctorRepository.findOne({
-      where: { crm: formattedCrm },
-      select: [
-        'id',
-        'name',
-        'email',
-        'gender',
-        'specialty',
-        'crm',
-        'phone',
-        'birthDate',
-        'profileImage',
-        'createdAt',
-        'updatedAt',
-      ],
-    });
+    const doctor = await this.doctorRepository
+      .createQueryBuilder('doctor')
+      .where('doctor.crm = :formatDash OR doctor.crm = :formatSlash', {
+        formatDash,
+        formatSlash,
+      })
+      .select([
+        'doctor.id',
+        'doctor.name',
+        'doctor.email',
+        'doctor.gender',
+        'doctor.specialty',
+        'doctor.crm',
+        'doctor.phone',
+        'doctor.birthDate',
+        'doctor.profileImage',
+        'doctor.createdAt',
+        'doctor.updatedAt',
+      ])
+      .getOne();
 
     if (!doctor) {
       throw new NotFoundException('Doctor not found');
